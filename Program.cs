@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using BarnCaseAPI.Data;
+using BarnCaseAPI.Services;
 using Microsoft.OpenApi.Models;
 using System.Reflection;
 
@@ -37,6 +38,11 @@ builder.Services.AddSwaggerGen(c =>
     c.AddSecurityRequirement(new OpenApiSecurityRequirement { { scheme, Array.Empty<string>() } });
     c.EnableAnnotations();
 });
+
+builder.Services.AddScoped<FarmService>();
+builder.Services.AddScoped<AnimalService>();
+builder.Services.AddScoped<ProductService>();
+builder.Services.AddScoped<ProductionService>();
 
 var app = builder.Build();
 
