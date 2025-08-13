@@ -1,31 +1,53 @@
 using Microsoft.EntityFrameworkCore;
 using BarnCaseAPI.Data;
-using BarnCaseAPI.Models;
+using Microsoft.OpenApi.Models;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
 
+builder.Services.AddControllers();
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "BarnCase API",
+        Version = "v1",
+        Description = "BarnCase API documentation"
+    });
+
+    var xmlName = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlName);
+    if (File.Exists(xmlPath)) c.IncludeXmlComments(xmlPath);
+
+    var scheme = new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "JWT Authorization header using the Bearer scheme."
+    };
+    c.AddSecurityDefinition("Bearer", scheme);
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement { { scheme, Array.Empty<string>() } });
+});
 
 var app = builder.Build();
 
-// app.UseHttpsRedirection();
-
-app.MapGet("/", () => "API is alive");
-app.MapGet("/users", (AppDbContext db) => db.Users.ToList());
-
-app.MapPost("/users", async (AppDbContext db, User user) =>
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    db.Users.Add(user);
-    await db.SaveChangesAsync();
-    return Results.Created($"/users/{user.Id}", user);
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "BarnCase API v1");
+    c.RoutePrefix = string.Empty;
 });
 
-app.MapGet("/users/{id:int}", async (AppDbContext db, int id) =>
-{
-    var u = await db.Users.FindAsync(id);
-    return u is null ? Results.NotFound() : Results.Ok(u);
-});
+// optional: app.UseHttpsRedirection();
 
-app.Run();
+app.MapControllers();
+
+app.Run();  
