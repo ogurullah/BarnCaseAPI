@@ -35,6 +35,7 @@ builder.Services.AddSwaggerGen(c =>
     };
     c.AddSecurityDefinition("Bearer", scheme);
     c.AddSecurityRequirement(new OpenApiSecurityRequirement { { scheme, Array.Empty<string>() } });
+    c.EnableAnnotations();
 });
 
 var app = builder.Build();
