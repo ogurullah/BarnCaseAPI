@@ -32,12 +32,14 @@ public class AppDbContext : DbContext
         b.Entity<Animal>()
             .HasOne(a => a.Farm)
             .WithMany(f => f.Animals)
-            .HasForeignKey(a => a.FarmID);
+            .HasForeignKey(a => a.FarmID)
+            .OnDelete(DeleteBehavior.Cascade);
 
         b.Entity<Product>()
             .HasOne(p => p.Farm)
             .WithMany(f => f.Products)
-            .HasForeignKey(p => p.FarmId);
+            .HasForeignKey(p => p.FarmId)
+            .OnDelete(DeleteBehavior.NoAction);
 
         b.Entity<User>().Property(u => u.Balance).HasPrecision(18, 2);
         b.Entity<Product>().Property(p => p.UnitPrice).HasPrecision(18, 2);

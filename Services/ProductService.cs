@@ -44,4 +44,11 @@ public class ProductService
         await _Database.SaveChangesAsync();
         return Math.Round(total, 2);
     }
+
+    public async Task<IEnumerable<Product>> GetProductsByFarmAsync(int farmId)
+    {
+        return await _Database.Products
+            .Where(p => p.FarmId == farmId && !p.isSold)
+            .ToListAsync();
+    }
 }

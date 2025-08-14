@@ -42,6 +42,7 @@ public class AnimalService
             Species = species,
             PurchasePrice = spec.price,
             LifeSpanInDays = spec.lifeDays,
+            PurchasedAt = DateTime.UtcNow,
             ProductionIntervalInMinutes = spec.intervalMin
         };
 
