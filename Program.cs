@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using BarnCaseAPI.Data;
 using BarnCaseAPI.Services;
+using BarnCaseAPI.Workers;
 using Microsoft.OpenApi.Models;
 using System.Reflection;
 using System.Text.Json.Serialization;
@@ -48,6 +49,8 @@ builder.Services.AddScoped<FarmService>();
 builder.Services.AddScoped<AnimalService>();
 builder.Services.AddScoped<ProductService>();
 builder.Services.AddScoped<ProductionService>();
+
+builder.Services.AddHostedService<ProductionWorker>(); // automatically starts producing products of animals
 
 var app = builder.Build();
 
