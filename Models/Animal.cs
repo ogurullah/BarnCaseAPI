@@ -13,7 +13,7 @@ public class Animal {
 
     public int LifeSpanInDays { get; set; }
 
-    public int RemainingLifeDays { get; set; } // calculated property, not stored in DB
+    public int RemainingLifeDays { get; set; }
     public int ProductionIntervalInMinutes { get; set; }
     public DateTime? LastProductionAt { get; set; }
 
