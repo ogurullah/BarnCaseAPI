@@ -35,8 +35,11 @@ public class ProductionService
         int created = 0;
         foreach (var animal in animals)
         {
-            if ((now - animal.PurchasedAt).TotalDays >= animal.LifeSpanInDays)
-            {
+            var ageInDays = (now - animal.PurchasedAt).TotalDays;
+            animal.RemainingLifeDays = Math.Max( 0, animal.LifeSpanInDays - (int)Math.Floor(ageInDays));
+            
+            if ((now - animal.PurchasedAt).TotalDays >= animal.LifeSpanInDays) // if enough days passed over animals birth day
+            {                                                                  // animal dies
                 animal.isAlive = false;
                 continue;
             }

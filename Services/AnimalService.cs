@@ -12,7 +12,7 @@ public class AnimalService
     private (decimal price, int lifeDays, int intervalMin, ProductType ptype) Specs(AnimalSpecies s) =>
         s switch
         {
-            AnimalSpecies.Cow => (price: 500m, lifeDays: 90, intervalMin: 60, ptype: ProductType.Milk),
+            AnimalSpecies.Cow => (price: 500m, lifeDays: 90, intervalMin: 1, ptype: ProductType.Milk), // set to 1 for testing, default 60
             AnimalSpecies.Chicken => (price: 50m, lifeDays: 45, intervalMin: 120, ptype: ProductType.Eggs),
             AnimalSpecies.Sheep => (price: 200m, lifeDays: 60, intervalMin: 180, ptype: ProductType.Wool),
             _ => throw new ArgumentOutOfRangeException(nameof(s))
@@ -42,6 +42,7 @@ public class AnimalService
             Species = species,
             PurchasePrice = spec.price,
             LifeSpanInDays = spec.lifeDays,
+            RemainingLifeDays = spec.lifeDays, // initially full lifespan
             PurchasedAt = DateTime.UtcNow,
             ProductionIntervalInMinutes = spec.intervalMin
         };
@@ -76,7 +77,7 @@ public class AnimalService
         await _Database.SaveChangesAsync();
         return sellPrice;
     }
-        public async Task<IEnumerable<Animal>> ViewAnimalsAsync(int farmId)
+    public async Task<IEnumerable<Animal>> ViewAnimalsAsync(int farmId)
     {
         return await _Database.Animals
             .Where(a => a.FarmID == farmId)

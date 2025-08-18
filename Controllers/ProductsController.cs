@@ -11,7 +11,7 @@ public class ProductsController : ControllerBase
     private readonly ProductService _productService;
     public ProductsController(ProductService productService) => _productService = productService;
 
-    public record SellRequest(int FarmId, int[] ProductIds);
+    public record SellRequest(int FarmId, int[] ProductIds);  // REST API convention for selling products
 
     [HttpPost("sell")]
     public async Task<ActionResult<object>> SellAsync([FromQuery] int userId, [FromBody] SellRequest request)

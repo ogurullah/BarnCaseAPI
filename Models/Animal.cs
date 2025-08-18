@@ -12,6 +12,8 @@ public class Animal {
     public decimal PurchasePrice { get; set; }
 
     public int LifeSpanInDays { get; set; }
+
+    public int RemainingLifeDays { get; set; } // calculated property, not stored in DB
     public int ProductionIntervalInMinutes { get; set; }
     public DateTime? LastProductionAt { get; set; }
 
