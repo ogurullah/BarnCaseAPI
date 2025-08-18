@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using BarnCaseAPI.Services;
-using BarnCaseAPI.Data;  // adjust if your DbContext is in a different namespace
+using BarnCaseAPI.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace BarnCaseAPI.Workers;
