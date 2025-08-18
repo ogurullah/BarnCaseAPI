@@ -22,6 +22,13 @@ public class AnimalsController : ControllerBase
         return new { earned };
     }
 
+    [HttpGet("{farmId:int}")]
+    public async Task<ActionResult<Animal?>> Get([FromRoute] int farmId)
+    {
+        var animals = await _animals.ViewAnimalsAsync(farmId);
+        return Ok(animals);
+    }
+
 }
 
 public record BuyAnimalRequest(AnimalSpecies Species);

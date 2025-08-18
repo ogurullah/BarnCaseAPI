@@ -76,5 +76,10 @@ public class AnimalService
         await _Database.SaveChangesAsync();
         return sellPrice;
     }
-
+        public async Task<IEnumerable<Animal>> ViewAnimalsAsync(int farmId)
+    {
+        return await _Database.Animals
+            .Where(a => a.FarmID == farmId)
+            .ToListAsync();
+    }
 }
