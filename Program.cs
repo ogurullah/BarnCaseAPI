@@ -5,8 +5,16 @@ using BarnCaseAPI.Workers;
 using Microsoft.OpenApi.Models;
 using System.Reflection;
 using System.Text.Json.Serialization;
+using Serilog;
+using BarnCaseAPI.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
+
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
@@ -54,6 +62,11 @@ builder.Services.AddHostedService<ProductionWorker>(); // automatically starts p
 
 var app = builder.Build();
 
+app.UseSerilogRequestLogging(options =>
+{
+    options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} -> {StatusCode} in {Elapsed:0.0000} ms";
+});
+
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -65,4 +78,16 @@ app.UseSwaggerUI(c =>
 
 app.MapControllers();
 
-app.Run();
+try
+{
+    Log.Information("Starting BarnCase API");
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application start-up failed");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
