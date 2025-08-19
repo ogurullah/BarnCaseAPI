@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text.Json.Serialization;
 using Serilog;
 using BarnCaseAPI.Logging;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -64,6 +65,7 @@ var app = builder.Build();
 
 app.UseSerilogRequestLogging(options =>
 {
+    options.GetLevel = (context, elapsed, exemption) => LogEventLevel.Information;
     options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} -> {StatusCode} in {Elapsed:0.0000} ms";
 });
 

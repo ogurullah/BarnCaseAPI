@@ -1,23 +1,32 @@
 using BarnCaseAPI.Data;
 using BarnCaseAPI.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace BarnCaseAPI.Services;
 
 public class ProductService
 {
     private readonly AppDbContext _Database;
-    public ProductService(AppDbContext Database) => _Database = Database;
+    private readonly ILogger<ProductService> _log;
+    public ProductService(AppDbContext Database, ILogger<ProductService> log)
+    {
+        _Database = Database;
+        _log = log;
+    }
 
     public async Task<decimal> SellAsync(int userId, int farmId, IEnumerable<int> productIds)
     {
+        using var _ = _log.BeginScope(new { userId, farmId, productIds });
+        _log.LogInformation("Selling products for farm with ID {farmId} for user with ID {userId}. Products: {productIds}", farmId, userId, productIds);
+
         var farm = await _Database.Farms.Include(f => f.Owner)
             .FirstAsync(f => f.Id == farmId && f.OwnerId == userId);
 
         var items = await _Database.Products
             .Where(p => p.FarmId == farmId && productIds.Contains(p.Id) && !p.isSold)
             .ToListAsync();
-
 
         if (items.Count == 0) return 0m;
         decimal total = 0m;
@@ -30,6 +39,7 @@ public class ProductService
             product.SoldTotal = TotalPrice;
             total += TotalPrice;
         }
+        _log.LogInformation("Total profit is {Total} from selling products {productIds} for farm with ID {farmId}.", total, productIds, farmId);
 
         farm.Owner.Balance += total;
 

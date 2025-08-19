@@ -35,7 +35,10 @@ public class AnimalService
 
         var spec = Specs(species);
         if (user.Balance < spec.price)
+        {
+            _log.LogWarning("User with ID {userID} does not have enough balance to buy {species}. Required: {price}, Available: {balance}", userID, species, spec.price, user.Balance);
             throw new InvalidOperationException("Insufficient balance");
+        }
 
         user.Balance -= spec.price;
         _Database.Ledger.Add(new Ledger
@@ -45,6 +48,7 @@ public class AnimalService
             Amount = spec.price,
             Reference = $"Bought {species} for farm {farm.Name}"
         });
+        _log.LogInformation("User {userID} balance updated after purchase. New balance: {balance}", userID, user.Balance);
 
         var animal = new Animal
         {
@@ -68,6 +72,8 @@ public class AnimalService
 
     public async Task<decimal> SellAsync(int userId, int animalId)
     {
+        using var _ = _log.BeginScope(new { userId, animalId });
+        _log.LogInformation("Selling animal with ID {animalId} for user with ID {userId}.", animalId, userId);
 
         var animal = await _Database.Animals.Include(a => a.Farm)
             .ThenInclude(f => f.Owner)
@@ -85,6 +91,7 @@ public class AnimalService
             Amount = sellPrice,
             Reference = $"Sold {animal.Species} for farm {animal.Farm.Name}"
         });
+        _log.LogInformation("Sold animal with ID {animalId} for user with ID {userId}. Sell price: {sellPrice}. New balance: {user.Balance}", animalId, userId, sellPrice, user.Balance);
 
         _Database.Animals.Remove(animal);
         await _Database.SaveChangesAsync();

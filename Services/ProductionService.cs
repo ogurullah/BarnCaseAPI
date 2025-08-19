@@ -1,13 +1,20 @@
 using BarnCaseAPI.Data;
 using BarnCaseAPI.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace BarnCaseAPI.Services;
 
 public class ProductionService
 {
     private readonly AppDbContext _Database;
-    public ProductionService(AppDbContext Database) => _Database = Database;
+    private readonly ILogger<ProductionService> _log;
+    public ProductionService(AppDbContext Database, ILogger<ProductionService> log)
+    {
+        _Database = Database;
+        _log = log;
+    }
 
     private decimal UnitPrice(ProductType type) => type switch
     {
@@ -27,6 +34,9 @@ public class ProductionService
 
     public async Task<int> TickAsync(int farmId, DateTime? nowUtc = null)
     {
+        using var _ = _log.BeginScope(new { farmId });
+        _log.LogInformation("Processing production tick for farm with ID {farmId}.", farmId);
+
         var now = nowUtc ?? DateTime.UtcNow;
 
         var animals = await _Database.Animals.Where(a => a.FarmID == farmId && a.isAlive)
@@ -41,6 +51,7 @@ public class ProductionService
             if ((now - animal.PurchasedAt).TotalDays >= animal.LifeSpanInDays) // if enough days passed over animals birth day
             {                                                                  // animal dies
                 animal.isAlive = false;
+                _log.LogInformation("Animal with ID {animal.Id} from farm with ID {farmId} has died.", animal.Id, farmId);
                 continue;
             }
 
@@ -68,6 +79,7 @@ public class ProductionService
                 UnitPrice = unitPrice,
                 CreatedAt = now
             });
+            _log.LogInformation("Produced {quantity} of {productType} for farm with ID {farmId} from animal with ID {animalId}.", quantity, productType, farmId, animal.Id);
 
             animal.LastProductionAt = now;
             created++;
