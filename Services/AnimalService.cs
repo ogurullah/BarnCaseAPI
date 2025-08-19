@@ -1,13 +1,20 @@
 using BarnCaseAPI.Data;
 using BarnCaseAPI.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace BarnCaseAPI.Services;
 
 public class AnimalService
 {
     private readonly AppDbContext _Database;
-    public AnimalService(AppDbContext Database) => _Database = Database;
+    private readonly ILogger<AnimalService> _log;
+    public AnimalService(AppDbContext Database, ILogger<AnimalService> log)
+    {
+        _Database = Database;
+        _log = log;
+    }
 
     private (decimal price, int lifeDays, int intervalMin, ProductType ptype) Specs(AnimalSpecies s) =>
         s switch
@@ -20,6 +27,9 @@ public class AnimalService
 
     public async Task<Animal> BuyAsync(int userID, int farmId, AnimalSpecies species)
     {
+        using var _ = _log.BeginScope(new { userID, farmId, species });
+        _log.LogInformation("Buying {species} for farm with ID {farmId} for user with ID {userID}.", species, farmId, userID);
+
         var user = await _Database.Users.Include(u => u.Ledger).FirstAsync(u => u.Id == userID);
         var farm = await _Database.Farms.FirstAsync(f => f.Id == farmId && f.OwnerId == userID);
 
@@ -49,6 +59,9 @@ public class AnimalService
 
         _Database.Animals.Add(animal);
         await _Database.SaveChangesAsync();
+
+        _log.LogInformation("Animal {species} purchased successfully with ID {AnimalId} for farm with ID {farmId} for user with ID {userId}", species, animal.Id, farmId, userID);
+
         return animal;
     }
 
