@@ -54,6 +54,7 @@ builder.Services.AddSwaggerGen(c =>
     c.EnableAnnotations();
 });
 
+builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<FarmService>();
 builder.Services.AddScoped<AnimalService>();
 builder.Services.AddScoped<ProductService>();

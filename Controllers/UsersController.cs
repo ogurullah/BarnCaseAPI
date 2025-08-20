@@ -1,5 +1,5 @@
-using BarnCaseAPI.Data;
 using BarnCaseAPI.Models;
+using BarnCaseAPI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,66 +7,110 @@ namespace BarnCaseAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class UsersController(AppDbContext db) : ControllerBase
+    public class UsersController : ControllerBase
     {
+        private readonly UserService _users;
+
+        public UsersController(UserService users)
+        {
+            _users = users;
+        }
+
         // GET: api/users?skip=0&take=50
         [HttpGet]
+        [ProducesResponseType(typeof(IEnumerable<User>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<User>>> GetUsers([FromQuery] int skip = 0, [FromQuery] int take = 50)
         {
-            var items = await db.Users
-                                .AsNoTracking()
-                                .Skip(Math.Max(0, skip))
-                                .Take(Math.Clamp(take, 1, 200))
-                                .ToListAsync();
+            var items = await _users.GetUsers(skip, take);
             return Ok(items);
         }
 
         // GET: api/users/5
         [HttpGet("{id:int}")]
+        [ProducesResponseType(typeof(User), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<User>> GetUser(int id)
         {
-            var user = await db.Users.FindAsync(id);
-            return user is null ? NotFound() : Ok(user);
+            try
+            {
+                var user = await _users.GetUser(id);
+                return Ok(user);
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound();
+            }
         }
 
         // POST: api/users
-
         public record CreateUserRequest(string Name, decimal Balance = 0);
 
         [HttpPost]
-        public async Task<ActionResult<User>> CreateUser([FromBody] CreateUserRequest Request)
+        [ProducesResponseType(typeof(User), StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<User>> CreateUser([FromBody] CreateUserRequest request)
         {
-            var user = new User { Name = Request.Name, Balance = Request.Balance };
-            db.Users.Add(user);
-            await db.SaveChangesAsync();
-            // returns 201 + Location header -> GET api/users/{id}
-            return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
+            if (string.IsNullOrWhiteSpace(request.Name))
+                return BadRequest("Name is required.");
+
+            try
+            {
+                var user = await _users.CreateUser(new UserService.CreateUserRequest(request.Name, request.Balance));
+                return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
+            }
+            catch (DbUpdateException ex)
+            {
+                // If you log, do it here
+                return Problem(title: "Failed to create user.", detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+            }
         }
 
         // PUT: api/users/5
         [HttpPut("{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UpdateUser(int id, [FromBody] User update)
         {
-            if (id != update.Id) return BadRequest("Id in URL and body must match.");
-
-            var exists = await db.Users.AnyAsync(u => u.Id == id);
-            if (!exists) return NotFound();
-
-            db.Entry(update).State = EntityState.Modified;
-            await db.SaveChangesAsync();
-            return NoContent();
+            try
+            {
+                await _users.UpdateUser(id, update);
+                return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // If using rowversion/concurrency tokens, map to 409
+                return Conflict("The user was modified by another process. Retry your request.");
+            }
         }
 
         // DELETE: api/users/5
         [HttpDelete("{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> DeleteUser(int id)
         {
-            var user = await db.Users.FindAsync(id);
-            if (user is null) return NotFound();
-
-            db.Users.Remove(user);
-            await db.SaveChangesAsync();
-            return NoContent();
+            try
+            {
+                await _users.DeleteUser(id);
+                return NoContent();
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound();
+            }
+            catch (DbUpdateException ex)
+            {
+                return Problem(title: "Failed to delete user.", detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+            }
         }
     }
 }
