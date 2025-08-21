@@ -3,6 +3,8 @@ using BarnCaseAPI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BarnCaseAPI.Contracts;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BarnCaseAPI.Controllers
 {
@@ -19,58 +21,65 @@ namespace BarnCaseAPI.Controllers
             _log = log;
         }
 
+        private static UserResponse ToResponse(User user) => new()
+        {
+            Id = user.Id,
+            Name = user.Name,
+            Role = user.Role,
+            Balance = user.Balance
+        };
+
+        // POST: api/user/register (public)
+        [HttpPost]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(UserResponse), StatusCodes.Status201Created)] //success
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]                    //wrong input
+        [ProducesResponseType(StatusCodes.Status409Conflict)]                      //user already exists
+        public async Task<ActionResult<UserResponse>> Register([FromBody] RegisterRequest request)
+        {
+            using var _ = _log.BeginScope("Register {Name}", request.Name);
+
+            try
+            {
+                var user = await _users.RegisterAsync(request, Role: "User");
+                return CreatedAtAction(nameof(GetUser), new { id = user.Id }, ToResponse(user));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (DbUpdateException ex)
+            {
+                var root = ex.GetBaseException()?.Message ?? ex.Message;
+                _log.LogError(ex, "Register failed {Root}", root);
+                return Problem(title: "Failed to register user.", detail: root, statusCode: 500);
+            }
+        }
+
         // GET: api/users?skip=0&take=50
         [HttpGet]
-        [ProducesResponseType(typeof(IEnumerable<User>), StatusCodes.Status200OK)]
-        public async Task<ActionResult<IEnumerable<User>>> GetUsers([FromQuery] int skip = 0, [FromQuery] int take = 50)
+        [ProducesResponseType(typeof(UserResponse), StatusCodes.Status200OK)]
+        public async Task<ActionResult<IEnumerable<UserResponse>>> GetUsers([FromQuery] int skip = 0, [FromQuery] int take = 50)
         {
+            if (skip < 0) skip = 0;
+            take = Math.Clamp(take, 1, 200);
+
             var items = await _users.GetUsers(skip, take);
-            return Ok(items);
+            return Ok(items.Select(ToResponse));
         }
 
         // GET: api/users/5
         [HttpGet("{id:int}")]
         [ProducesResponseType(typeof(User), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<User>> GetUser(int id)
+        public async Task<ActionResult<UserResponse>> GetUser(int id)
         {
-            try
-            {
-                var user = await _users.GetUser(id);
-                return Ok(user);
-            }
-            catch (KeyNotFoundException)
-            {
-                return NotFound();
-            }
-        }
-
-        // POST: api/users
-        public record CreateUserRequest(string Name, decimal Balance = 0);
-
-        [HttpPost]
-        [ProducesResponseType(typeof(User), StatusCodes.Status201Created)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<ActionResult<User>> CreateUser([FromBody] BarnCaseAPI.Contracts.CreateUserRequest request)
-        {
-            using var _ = _log?.BeginScope("CreateUser {Name}", request.Name);
-            if (string.IsNullOrWhiteSpace(request.Name))
-                return BadRequest("Name is required.");
-
-            try
-            {
-                var user = await _users.CreateUser(request);
-                return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
-            }
-            catch (DbUpdateException ex)
-            {
-                var root = ex.GetBaseException()?.Message ?? ex.Message;
-                _log.LogError(ex, "CreateUser failed. Root cause: {Root}", root);
-
-                // surface the useful part in the response while you're debugging
-                return Problem(title: "Failed to create user.", detail: root,
-                            statusCode: StatusCodes.Status500InternalServerError);
-            }
+            var user = await _users.GetUser(id);
+            return user is null ? NotFound() : Ok(ToResponse(user));
         }
 
         // PUT: api/users/5
@@ -78,11 +87,12 @@ namespace BarnCaseAPI.Controllers
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> UpdateUser(int id, [FromBody] User update)
+        public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateUserRequest update)
         {
             try
             {
-                await _users.UpdateUser(id, update);
+                var callerIsAdmin = User.IsInRole("Admin");
+                await _users.UpdateUser(id, update, callerIsAdmin);
                 return NoContent();
             }
             catch (ArgumentException ex)
@@ -95,7 +105,6 @@ namespace BarnCaseAPI.Controllers
             }
             catch (DbUpdateConcurrencyException)
             {
-                // If using rowversion/concurrency tokens, map to 409
                 return Conflict("The user was modified by another process. Retry your request.");
             }
         }
@@ -103,17 +112,28 @@ namespace BarnCaseAPI.Controllers
         // DELETE: api/users/5
         [HttpDelete("{id:int}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> DeleteUser(int id)
         {
             try
             {
-                await _users.DeleteUser(id);
+                var callerIsAdmin = User.IsInRole("Admin");
+                await _users.DeleteUser(id, callerIsAdmin);
                 return NoContent();
             }
             catch (KeyNotFoundException)
             {
                 return NotFound();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Forbid(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
             }
             catch (DbUpdateException ex)
             {

@@ -1,6 +1,7 @@
 namespace BarnCaseAPI.Models;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 public class User
 {
@@ -10,7 +11,9 @@ public class User
     public string Name { get; set; } = "";
     public string? Role { get; set; } = "User"; // Default role is User, can be User or Admin
 
+    [JsonIgnore]
     public byte[] PasswordHash { get; set; } = default!;
+    [JsonIgnore]
     public byte[] PasswordSalt { get; set; } = default!;
 
     public decimal Balance { get; set; }
