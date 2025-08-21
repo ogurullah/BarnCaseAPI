@@ -8,6 +8,11 @@ using System.Text.Json.Serialization;
 using Serilog;
 using BarnCaseAPI.Logging;
 using Serilog.Events;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using BarnCaseAPI.Options;
+using BarnCaseAPI.Security;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,10 +25,63 @@ builder.Host.UseSerilog();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
 
-builder.Services.AddControllers();
+//builder.Services.AddControllers();
 builder.Services.AddControllers().AddJsonOptions(o =>
 {
     o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles; // crashes without this
+});
+
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+
+builder.Services.AddScoped<IPasswordService, PasswordService>();
+builder.Services.AddScoped<ITokenService, TokenService>();
+
+var jwtSection = builder.Configuration.GetSection("Jwt");
+var issuer = jwtSection.GetValue<string>("Issuer") ?? throw new InvalidOperationException("JWT Issuer is not configured.");
+var audience = jwtSection.GetValue<string>("Audience") ?? throw new InvalidOperationException("JWT Audience is not configured.");
+var keyB64 = jwtSection.GetValue<string>("SigningKeyB64");
+if (string.IsNullOrWhiteSpace(keyB64))
+{
+    throw new InvalidOperationException("JWT SigningKeyB64 is not configured.");
+}
+var signingKey = new SymmetricSecurityKey(Convert.FromBase64String(keyB64));
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+
+            ValidIssuer = issuer,
+            ValidAudience = audience,
+            IssuerSigningKey = signingKey,
+
+            ClockSkew = TimeSpan.FromSeconds(15)
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                context.NoResult();
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+builder.Services.AddSingleton<IAuthorizationHandler, AdminOrSelfHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, AdminOrOwnerHandler>();
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOnly", p => p.RequireRole("Admin"));
+    options.AddPolicy("AdminOrSelf", p => p.AddRequirements(new AdminOrSelfRequirement()));
+    options.AddPolicy("AdminOrOwner", p => p.AddRequirements(new AdminOrOwnerRequirement()));
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -35,6 +93,8 @@ builder.Services.AddSwaggerGen(c =>
         Version = "v1",
         Description = "BarnCase API documentation"
     });
+
+    c.CustomSchemaIds(t => t.FullName);
 
     var xmlName = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlName);
@@ -70,6 +130,7 @@ app.UseSerilogRequestLogging(options =>
     options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} -> {StatusCode} in {Elapsed:0.0000} ms";
 });
 
+app.UseDeveloperExceptionPage();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -77,6 +138,8 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = string.Empty;
 });
 
+app.UseAuthentication();
+app.UseAuthorization();
 // optional: app.UseHttpsRedirection();
 
 app.MapControllers();

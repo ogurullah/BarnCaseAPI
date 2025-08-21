@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using BarnCaseAPI.Models;
+using Microsoft.AspNetCore.Routing.Template;
 
-namespace BarnCaseAPI.Data; // <- change to your project’s root namespace if different
+namespace BarnCaseAPI.Data;
 
 public class AppDbContext : DbContext
 {
@@ -12,11 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<Animal> Animals => Set<Animal>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<Ledger> Ledger => Set<Ledger>();
-
-    // Example DbSets — replace with your real entities
-    //public DbSet<User> Users { get; set; } = default!;
-    // public DbSet<Something> Somethings { get; set; } = default!;
-
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<User>()
@@ -40,6 +37,16 @@ public class AppDbContext : DbContext
             .WithMany(f => f.Products)
             .HasForeignKey(p => p.FarmId)
             .OnDelete(DeleteBehavior.NoAction);
+
+        b.Entity<RefreshToken>()
+            .Property(rt => rt.Token)
+            .HasMaxLength(512);
+        
+        b.Entity<RefreshToken>()
+            .HasOne(rt => rt.User)
+            .WithMany(u => u.RefreshTokens)
+            .HasForeignKey(rt => rt.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         b.Entity<User>().Property(u => u.Balance).HasPrecision(18, 2);
         b.Entity<Product>().Property(p => p.UnitPrice).HasPrecision(18, 2);
