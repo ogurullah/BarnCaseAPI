@@ -25,7 +25,7 @@ builder.Host.UseSerilog();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
 
-builder.Services.AddControllers();
+//builder.Services.AddControllers();
 builder.Services.AddControllers().AddJsonOptions(o =>
 {
     o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles; // crashes without this
@@ -94,6 +94,8 @@ builder.Services.AddSwaggerGen(c =>
         Description = "BarnCase API documentation"
     });
 
+    c.CustomSchemaIds(t => t.FullName);
+
     var xmlName = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlName);
     if (File.Exists(xmlPath)) c.IncludeXmlComments(xmlPath);
@@ -112,21 +114,6 @@ builder.Services.AddSwaggerGen(c =>
     c.EnableAnnotations();
 });
 
-builder.Services.AddSwaggerGen(c =>
-{
-    var scheme = new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "Enter: Bearer {your JWT}"
-    };
-    c.AddSecurityDefinition("Bearer", scheme);
-    c.AddSecurityRequirement(new() { { scheme, Array.Empty<string>() } });
-});
-
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<FarmService>();
 builder.Services.AddScoped<AnimalService>();
@@ -143,6 +130,7 @@ app.UseSerilogRequestLogging(options =>
     options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} -> {StatusCode} in {Elapsed:0.0000} ms";
 });
 
+app.UseDeveloperExceptionPage();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {

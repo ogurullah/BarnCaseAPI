@@ -5,6 +5,7 @@ using BarnCaseAPI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using BarnCaseAPI.Contracts;
 
 [ApiController]
 [Route("auth")]
@@ -115,5 +116,3 @@ public sealed class AuthController : ControllerBase
         return NoContent();
     }
 }
-
-//step 11
