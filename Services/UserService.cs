@@ -3,6 +3,7 @@ using BarnCaseAPI.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using BarnCaseAPI.Contracts;
 
 namespace BarnCaseAPI.Services;
 
@@ -39,7 +40,7 @@ public class UserService
                             .ToListAsync();
         return items;
     }
-    public record CreateUserRequest(string Name, decimal Balance = 0);
+//    public record CreateUserRequest(string Name, decimal Balance = 0);
     public async Task<User> CreateUser(CreateUserRequest Request)
     {
         using var _ = _log.BeginScope(new { Request.Name, Request.Balance });

@@ -2,6 +2,7 @@ using BarnCaseAPI.Models;
 using BarnCaseAPI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using BarnCaseAPI.Contracts;
 
 namespace BarnCaseAPI.Controllers
 {
@@ -9,11 +10,13 @@ namespace BarnCaseAPI.Controllers
     [Route("api/[controller]")]
     public class UsersController : ControllerBase
     {
+        private readonly ILogger<UsersController> _log;
         private readonly UserService _users;
 
-        public UsersController(UserService users)
+        public UsersController(UserService users, ILogger<UsersController> log)
         {
             _users = users;
+            _log = log;
         }
 
         // GET: api/users?skip=0&take=50
@@ -48,20 +51,25 @@ namespace BarnCaseAPI.Controllers
         [HttpPost]
         [ProducesResponseType(typeof(User), StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<ActionResult<User>> CreateUser([FromBody] CreateUserRequest request)
+        public async Task<ActionResult<User>> CreateUser([FromBody] BarnCaseAPI.Contracts.CreateUserRequest request)
         {
+            using var _ = _log?.BeginScope("CreateUser {Name}", request.Name);
             if (string.IsNullOrWhiteSpace(request.Name))
                 return BadRequest("Name is required.");
 
             try
             {
-                var user = await _users.CreateUser(new UserService.CreateUserRequest(request.Name, request.Balance));
+                var user = await _users.CreateUser(request);
                 return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
             }
             catch (DbUpdateException ex)
             {
-                // If you log, do it here
-                return Problem(title: "Failed to create user.", detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+                var root = ex.GetBaseException()?.Message ?? ex.Message;
+                _log.LogError(ex, "CreateUser failed. Root cause: {Root}", root);
+
+                // surface the useful part in the response while you're debugging
+                return Problem(title: "Failed to create user.", detail: root,
+                            statusCode: StatusCodes.Status500InternalServerError);
             }
         }
 
