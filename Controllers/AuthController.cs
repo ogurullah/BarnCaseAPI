@@ -124,7 +124,7 @@ public sealed class AuthController : ControllerBase
     {
         return Ok(new
         {
-            name = User.Identity?.Name,
+            name = User.FindFirstValue(ClaimTypes.Name),
             id = User.FindFirstValue(ClaimTypes.NameIdentifier),
             isAuthenticated = User.Identity?.IsAuthenticated ?? false,
             roles = User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray(),

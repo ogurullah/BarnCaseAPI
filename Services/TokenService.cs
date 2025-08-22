@@ -43,7 +43,7 @@ public sealed class TokenService : ITokenService
             // identity
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.Name ?? user.Id.ToString()),
+            new Claim(ClaimTypes.Name, user.Name),
 
             // authorization
             new Claim(ClaimTypes.Role, role),
