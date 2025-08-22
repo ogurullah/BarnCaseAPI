@@ -25,7 +25,7 @@ public class FarmsController : ControllerBase
     public async Task<ActionResult<Farm>> Create([FromBody] CreateFarmRequest request)
     {
         var userId = User.UserId();
-        var farm = await _farms.CreateFarmAsync(userId, request.Name);
+        var farm = await _farms.CreateFarmAsync(userId, request.farmName);
         return Ok(farm);
     }
 
@@ -33,12 +33,12 @@ public class FarmsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<Farm?>> Get(int id) => await _farms.GetFarmAsync(id);
 
-    [HttpPost("{id:int}/tick")]
-    public async Task<ActionResult<object>> Tick(int id)
-    {
-        var created = await _production.TickAsync(id);
-        return new { created };
-    }
+//    [HttpPost("{id:int}/tick")]
+//    public async Task<ActionResult<object>> Tick(int id)
+//    {
+//        var created = await _production.TickAsync(id);
+//        return new { created };
+//    }
 
     [Authorize]
     [HttpGet("mine")]
@@ -49,5 +49,5 @@ public class FarmsController : ControllerBase
         return Ok(farms);
     }
 }
-public record CreateFarmRequest(string Name);
+public record CreateFarmRequest(string farmName);
 

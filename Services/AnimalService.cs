@@ -19,7 +19,7 @@ public class AnimalService
     private (decimal price, int lifeDays, int intervalMin, ProductType ptype) Specs(AnimalSpecies s) =>
         s switch
         {
-            AnimalSpecies.Cow => (price: 500m, lifeDays: 90, intervalMin: 1, ptype: ProductType.Milk), // set to 1 for testing, default 60
+            AnimalSpecies.Cow => (price: 500m, lifeDays: 90, intervalMin: 60, ptype: ProductType.Milk), // set to 1 for testing, default 60
             AnimalSpecies.Chicken => (price: 50m, lifeDays: 45, intervalMin: 120, ptype: ProductType.Eggs),
             AnimalSpecies.Sheep => (price: 200m, lifeDays: 60, intervalMin: 180, ptype: ProductType.Wool),
             _ => throw new ArgumentOutOfRangeException(nameof(s))
@@ -30,8 +30,25 @@ public class AnimalService
         using var _ = _log.BeginScope(new { userID, farmId, species });
         _log.LogInformation("Buying {species} for farm with ID {farmId} for user with ID {userID}.", species, farmId, userID);
 
-        var user = await _Database.Users.Include(u => u.Ledger).FirstAsync(u => u.Id == userID);
-        var farm = await _Database.Farms.FirstAsync(f => f.Id == farmId && f.OwnerId == userID);
+        var user = await _Database.Users
+        .Include(u => u.Ledger)
+        .FirstAsync(u => u.Id == userID);
+
+        var farm = await _Database.Farms
+            .FirstOrDefaultAsync(f => f.Id == farmId);
+
+        if (farm == null)
+        {
+            _log.LogWarning("Farm with ID {farmId} not found.", farmId);
+            throw new InvalidOperationException("Farm not found");
+        }
+
+        if (farm.OwnerId != userID)
+        {
+            _log.LogWarning("User with ID {userID} attempted to buy {species} for farm {farmId}, which is owned by {ownerId}.",
+                            userID, species, farmId, farm.OwnerId);
+            throw new InvalidOperationException("You do not own this farm");
+        }
 
         var spec = Specs(species);
         if (user.Balance < spec.price)
