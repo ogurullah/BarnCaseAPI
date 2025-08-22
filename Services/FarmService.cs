@@ -21,7 +21,8 @@ public class FarmService
         _log.LogInformation("Creating farm named {name} for user with id {ownerId}.", name, ownerId);
 
         var owner = await _Database.Users.FindAsync(ownerId);
-        if (owner == null) {
+        if (owner == null)
+        {
             _log.LogWarning("User with ID {ownerId} not found. Cannot create farm.", ownerId);
             throw new InvalidOperationException("User not found");
         }
@@ -38,4 +39,15 @@ public class FarmService
     public Task<Farm?> GetFarmAsync(int farmId) =>
         _Database.Farms.Include(f => f.Animals).Include(f => f.Products)
             .FirstOrDefaultAsync(f => f.Id == farmId);
+
+    public async Task<IReadOnlyList<Farm>> GetAllFarmsForUserAsync(int userId)
+    {
+        return await _Database.Farms
+            .Include(f => f.Animals)
+            .Include(f => f.Products)
+            .Where(f => f.OwnerId == userId)
+            .AsNoTracking()
+            .AsSplitQuery()
+            .ToListAsync();
+    }
 }

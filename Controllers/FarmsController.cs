@@ -1,6 +1,8 @@
 using BarnCaseAPI.Models;
 using BarnCaseAPI.Services;
+using BarnCaseAPI.Security;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BarnCaseAPI.Controllers;
 
@@ -18,10 +20,16 @@ public class FarmsController : ControllerBase
         _production = production;
     }
 
+    [Authorize]
     [HttpPost]
-    public async Task<ActionResult<Farm>> Create([FromQuery] int ownerId, [FromBody] CreateFarmRequest request)
-        => await _farms.CreateFarmAsync(ownerId, request.Name);
+    public async Task<ActionResult<Farm>> Create([FromBody] CreateFarmRequest request)
+    {
+        var userId = User.UserId();
+        var farm = await _farms.CreateFarmAsync(userId, request.Name);
+        return Ok(farm);
+    }
 
+    [Authorize]
     [HttpGet("{id:int}")]
     public async Task<ActionResult<Farm?>> Get(int id) => await _farms.GetFarmAsync(id);
 
@@ -32,7 +40,14 @@ public class FarmsController : ControllerBase
         return new { created };
     }
 
+    [Authorize]
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<Farm>>> GetMine()
+    {
+        var userId = User.UserId();
+        var farms = await _farms.GetAllFarmsForUserAsync(userId);
+        return Ok(farms);
+    }
 }
-
 public record CreateFarmRequest(string Name);
 
