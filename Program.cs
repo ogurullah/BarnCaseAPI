@@ -13,6 +13,8 @@ using Microsoft.IdentityModel.Tokens;
 using BarnCaseAPI.Options;
 using BarnCaseAPI.Security;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,6 +33,7 @@ builder.Services.AddControllers().AddJsonOptions(o =>
     o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles; // crashes without this
 });
 
+JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 
 builder.Services.AddScoped<IPasswordService, PasswordService>();
@@ -39,12 +42,12 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var issuer = jwtSection.GetValue<string>("Issuer") ?? throw new InvalidOperationException("JWT Issuer is not configured.");
 var audience = jwtSection.GetValue<string>("Audience") ?? throw new InvalidOperationException("JWT Audience is not configured.");
-var keyB64 = jwtSection.GetValue<string>("SigningKeyB64");
+var keyB64 = jwtSection.GetValue<string>("SigningKeyB64") ?? throw new InvalidOperationException("JWT SigningKeyB64 is not configured.");
+var signingKey = new SymmetricSecurityKey(Convert.FromBase64String(keyB64));
 if (string.IsNullOrWhiteSpace(keyB64))
 {
     throw new InvalidOperationException("JWT SigningKeyB64 is not configured.");
 }
-var signingKey = new SymmetricSecurityKey(Convert.FromBase64String(keyB64));
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -53,29 +56,48 @@ builder.Services
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-
             ValidIssuer = issuer,
+
+            ValidateAudience = true,
             ValidAudience = audience,
+
+            ValidateIssuerSigningKey = true,
             IssuerSigningKey = signingKey,
 
-            ClockSkew = TimeSpan.FromSeconds(15)
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(15),
+            
+            RoleClaimType = ClaimTypes.Role,
+            NameClaimType = ClaimTypes.NameIdentifier
         };
 
         options.Events = new JwtBearerEvents
         {
-            OnAuthenticationFailed = context =>
+            OnAuthenticationFailed = ctx =>
             {
-                context.NoResult();
+                Log.Warning(ctx.Exception, "JWT auth failed");
+                return Task.CompletedTask;
+            },
+            OnMessageReceived = ctx =>
+            {
+                // Helps debug Swagger not sending the header you think it is
+                if (string.IsNullOrEmpty(ctx.Token))
+                    Log.Warning("No bearer token found on request to {Path}", ctx.Request.Path);
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = ctx =>
+            {
+                var roles = ctx.Principal?.FindAll(ClaimTypes.Role).Select(r => r.Value).ToArray() ?? Array.Empty<string>();
+                Log.Information("JWT ok for sub={Sub}, roles=[{Roles}]",
+                    ctx.Principal?.FindFirstValue(ClaimTypes.NameIdentifier),
+                    string.Join(",", roles));
                 return Task.CompletedTask;
             }
         };
     });
 
-builder.Services.AddSingleton<IAuthorizationHandler, AdminOrSelfHandler>();
-builder.Services.AddSingleton<IAuthorizationHandler, AdminOrOwnerHandler>();
+//builder.Services.AddSingleton<IAuthorizationHandler, AdminOrSelfHandler>();
+//builder.Services.AddSingleton<IAuthorizationHandler, AdminOrOwnerHandler>();
 
 builder.Services.AddAuthorization(options =>
 {
@@ -109,9 +131,30 @@ builder.Services.AddSwaggerGen(c =>
         In = ParameterLocation.Header,
         Description = "JWT Authorization header using the Bearer scheme."
     };
-    c.AddSecurityDefinition("Bearer", scheme);
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement { { scheme, Array.Empty<string>() } });
-    c.EnableAnnotations();
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        In = ParameterLocation.Header,
+        Description = "Enter: Bearer {your JWT}",
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+//    c.EnableAnnotations();
 });
 
 builder.Services.AddScoped<UserService>();
@@ -138,6 +181,7 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = string.Empty;
 });
 
+app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 // optional: app.UseHttpsRedirection();

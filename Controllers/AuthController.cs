@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using BarnCaseAPI.Contracts;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 
 [ApiController]
 [Route("auth")]
@@ -114,5 +116,19 @@ public sealed class AuthController : ControllerBase
         token.RevokedAt = DateTime.UtcNow;
         await _Database.SaveChangesAsync();
         return NoContent();
+    }
+
+    [Authorize]
+    [HttpGet("whoami")]
+    public IActionResult WhoAmI()
+    {
+        return Ok(new
+        {
+            name = User.Identity?.Name,
+            id = User.FindFirstValue(ClaimTypes.NameIdentifier),
+            isAuthenticated = User.Identity?.IsAuthenticated ?? false,
+            roles = User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray(),
+            claims = User.Claims.Select(c => new { c.Type, c.Value })
+        });
     }
 }

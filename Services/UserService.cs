@@ -3,6 +3,7 @@ using BarnCaseAPI.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using BarnCaseAPI.Contracts;
 
 namespace BarnCaseAPI.Services;
 
@@ -10,11 +11,53 @@ public class UserService
 {
     private readonly AppDbContext _Database;
     private readonly ILogger<UserService> _log;
+    private readonly IPasswordService _Passwords;
 
-    public UserService(AppDbContext Database, ILogger<UserService> log)
+    public UserService(AppDbContext Database, ILogger<UserService> log, IPasswordService Passwords)
     {
         _Database = Database;
         _log = log;
+        _Passwords = Passwords;
+    }
+
+    public async Task<User> RegisterAsync(RegisterRequest request, string Role = "User")
+    {
+        using var _ = _log.BeginScope(new { request.Name });
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            _log.LogWarning("Name is empty.");
+            throw new ArgumentException("Name is required.", nameof(request.Name));
+        }
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
+        {
+            _log.LogWarning("Password can't be shorter than 8 characters.");
+            throw new ArgumentException("Password can't be shorter than 8 characters.", nameof(request.Password));
+        }
+
+        bool exists = await _Database.Users.AnyAsync(u => u.Name == request.Name);
+        if (exists)
+        {
+            _log.LogWarning("Username {request.Name} already exists.", request.Name);
+            throw new InvalidOperationException("Username already exists.");
+        }
+
+        var (hash, salt) = _Passwords.Hash(request.Password);
+
+        var user = new User
+        {
+            Name = request.Name,
+            Role = string.IsNullOrWhiteSpace(request.Role) ? "User" : request.Role,
+            PasswordHash = hash,
+            PasswordSalt = salt,
+            Balance = request.Balance
+        };
+
+        _Database.Users.Add(user);
+        await _Database.SaveChangesAsync();
+
+        _log.LogInformation("User {name} registered with ID {UserId}", user.Name, user.Id);
+        return user;
     }
 
     public async Task<User?> GetUser(int id)
@@ -39,7 +82,7 @@ public class UserService
                             .ToListAsync();
         return items;
     }
-    public record CreateUserRequest(string Name, decimal Balance = 0);
+//    public record CreateUserRequest(string Name, decimal Balance = 0);
     public async Task<User> CreateUser(CreateUserRequest Request)
     {
         using var _ = _log.BeginScope(new { Request.Name, Request.Balance });
@@ -50,14 +93,10 @@ public class UserService
         return user;
     }
 
-    public async Task UpdateUser(int id, User incoming)
+    public async Task UpdateUser(int id, UpdateUserRequest incoming, bool callerIsAdmin)
     {
-        using var _ = _log.BeginScope(new { id, incoming.Name, incoming.Balance });
-        if (id != incoming.Id)
-        {
-            _log.LogWarning("User ID in URL and body did not match during update. URL ID: {id}, Body ID: {incomingId}", id, incoming.Id);
-            throw new ArgumentException("Id in URL and body must match.");
-        }
+        using var _ = _log.BeginScope(new { id, incoming?.Name, incoming?.Balance, incoming?.Role, callerIsAdmin });
+
         var user = await _Database.Users.FirstOrDefaultAsync(u => u.Id == id);
         if (user is null)
         {
@@ -65,17 +104,60 @@ public class UserService
             throw new KeyNotFoundException($"User with ID {id} not found.");
         }
 
-        user.Name = incoming.Name;
-        user.Balance = incoming.Balance;
-        _log.LogInformation("User with ID {id} updated. New Name: {Name}, New Balance: {Balance}.", id, user.Name, user.Balance);
+        if (incoming is null)
+        {
+            throw new ArgumentException("Body is required.");
+        }
+
+        if (incoming.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(incoming.Name))
+            {
+                throw new ArgumentException("Name can't be empty.");
+            }
+            user.Name = incoming.Name.Trim();
+        }
+        if (incoming.Balance is not null)
+        {
+            if (!callerIsAdmin)
+            {
+                throw new ArgumentException("Only admins can update balance.");
+            }
+            else
+            {
+                user.Balance = incoming.Balance.Value;
+            }
+        }
+        if (incoming.Role is not null)
+        {
+            if (!callerIsAdmin)
+            {
+                throw new ArgumentException("Only admins can update roles.");
+            }
+            else
+            {
+                var role = incoming.Role.Trim();
+                if (role is not ("User" or "Admin"))
+                {
+                    throw new ArgumentException("Role must be 'User' or 'Admin'.");
+                }
+                user.Role = role;
+            }
+        }
 
         await _Database.SaveChangesAsync();
+        _log.LogInformation("User {id} updated.", id);
     }
 
 
-    public async Task DeleteUser(int id)
+    public async Task DeleteUser(int id, bool callerIsAdmin)
     {
         using var _ = _log.BeginScope(new { id });
+        if (!callerIsAdmin)
+        {
+            throw new UnauthorizedAccessException("Only admins can delete user accounts.");
+        }
+        
         var user = await _Database.Users.FindAsync(id);
         if (user is null)
         {
@@ -83,8 +165,8 @@ public class UserService
             throw new KeyNotFoundException($"User with ID {id} not found.");
         }
         _Database.Users.Remove(user);
-        _log.LogInformation("User with ID {id} deleted successfully.", id);
         await _Database.SaveChangesAsync();
+        _log.LogInformation("User with ID {id} deleted successfully.", id);
         return;
     }
 }

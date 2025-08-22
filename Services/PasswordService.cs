@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 
+namespace BarnCaseAPI.Services;
+
 public interface IPasswordService
 {
     (byte[] hash, byte[] salt) Hash(string password);
