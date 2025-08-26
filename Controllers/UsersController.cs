@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using BarnCaseAPI.Contracts;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
+using BarnCaseAPI.Security;
 
 namespace BarnCaseAPI.Controllers
 {
@@ -83,6 +84,7 @@ namespace BarnCaseAPI.Controllers
         }
 
         // PUT: api/users/5
+        [Authorize]
         [HttpPut("{id:int}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -91,8 +93,14 @@ namespace BarnCaseAPI.Controllers
         {
             try
             {
-                var callerIsAdmin = User.IsInRole("Admin");
-                await _users.UpdateUser(id, update, callerIsAdmin);
+                var callerId = User.UserId();
+                bool isAdmin = User.IsInRole("Admin");
+                bool isOwner = callerId == id;
+                if (!(isAdmin || isOwner))
+                {
+                    return Forbid("Only admins or account owners can modify user account data.");
+                }
+                await _users.UpdateUser(id, update, isAdmin, isOwner);
                 return NoContent();
             }
             catch (ArgumentException ex)
@@ -103,6 +111,10 @@ namespace BarnCaseAPI.Controllers
             {
                 return NotFound();
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid("Only admins or account owners can modify user account data.");
+            }
             catch (DbUpdateConcurrencyException)
             {
                 return Conflict("The user was modified by another process. Retry your request.");
@@ -110,18 +122,24 @@ namespace BarnCaseAPI.Controllers
         }
 
         // DELETE: api/users/5
+        [Authorize]
         [HttpDelete("{id:int}")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)] // error conditions should be revisited
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> DeleteUser(int id)
         {
             try
             {
-                var callerIsAdmin = User.IsInRole("Admin");
-                await _users.DeleteUser(id, callerIsAdmin);
-                return NoContent();
+                var callerId = User.UserId();
+                bool isAdmin = User.IsInRole("Admin");
+                bool isOwner = callerId == id;
+                if (isAdmin || isOwner)
+                {
+                    await _users.DeleteUser(id, isAdmin, isOwner);
+                    return NoContent();
+                }
             }
             catch (KeyNotFoundException)
             {
@@ -139,6 +157,7 @@ namespace BarnCaseAPI.Controllers
             {
                 return Problem(title: "Failed to delete user.", detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
             }
+            return Forbid("Only admins or account owners can delete user accounts.");
         }
     }
 }

@@ -1,6 +1,8 @@
 using BarnCaseAPI.Services;
 using BarnCaseAPI.Models;
 using Microsoft.AspNetCore.Mvc;
+using BarnCaseAPI.Security;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BarnCaseAPI.Controllers;
 
@@ -11,11 +13,13 @@ public class ProductsController : ControllerBase
     private readonly ProductService _productService;
     public ProductsController(ProductService productService) => _productService = productService;
 
-    public record SellRequest(int FarmId, int[] ProductIds);  // REST API convention for selling products
+    public record SellRequest(int FarmId, int[] ProductIds);
 
+    [Authorize]
     [HttpPost("sell")]
-    public async Task<ActionResult<object>> SellAsync([FromQuery] int userId, [FromBody] SellRequest request)
+    public async Task<ActionResult<object>> SellAsync([FromBody] SellRequest request)
     {
+        var userId = User.UserId();
         var total = await _productService.SellAsync(userId, request.FarmId, request.ProductIds);
         return new { total };
     }

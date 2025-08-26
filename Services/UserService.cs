@@ -93,9 +93,9 @@ public class UserService
         return user;
     }
 
-    public async Task UpdateUser(int id, UpdateUserRequest incoming, bool callerIsAdmin)
+    public async Task UpdateUser(int id, UpdateUserRequest incoming, bool isAdmin, bool isOwner)
     {
-        using var _ = _log.BeginScope(new { id, incoming?.Name, incoming?.Balance, incoming?.Role, callerIsAdmin });
+        using var _ = _log.BeginScope(new { id, incoming?.Name, isAdmin, isOwner});
 
         var user = await _Database.Users.FirstOrDefaultAsync(u => u.Id == id);
         if (user is null)
@@ -109,19 +109,26 @@ public class UserService
             throw new ArgumentException("Body is required.");
         }
 
+        if (!(isAdmin || isOwner))
+        {
+            throw new UnauthorizedAccessException("Only accounts owners or admins can modify account data.");
+        }
         if (incoming.Name is not null)
         {
             if (string.IsNullOrWhiteSpace(incoming.Name))
             {
                 throw new ArgumentException("Name can't be empty.");
             }
-            user.Name = incoming.Name.Trim();
+            else if (isAdmin || isOwner)
+            {
+                user.Name = incoming.Name.Trim();
+            }
         }
         if (incoming.Balance is not null)
         {
-            if (!callerIsAdmin)
+            if (!isAdmin)
             {
-                throw new ArgumentException("Only admins can update balance.");
+                throw new UnauthorizedAccessException("Only admins can update balance.");
             }
             else
             {
@@ -130,9 +137,9 @@ public class UserService
         }
         if (incoming.Role is not null)
         {
-            if (!callerIsAdmin)
+            if (!isAdmin)
             {
-                throw new ArgumentException("Only admins can update roles.");
+                throw new UnauthorizedAccessException("Only admins can update roles.");
             }
             else
             {
@@ -150,12 +157,12 @@ public class UserService
     }
 
 
-    public async Task DeleteUser(int id, bool callerIsAdmin)
+    public async Task DeleteUser(int id, bool isAdmin, bool isOwner)
     {
         using var _ = _log.BeginScope(new { id });
-        if (!callerIsAdmin)
+        if (!(isAdmin || isOwner))
         {
-            throw new UnauthorizedAccessException("Only admins can delete user accounts.");
+            throw new UnauthorizedAccessException("Only admins or account owners can delete user accounts.");
         }
         
         var user = await _Database.Users.FindAsync(id);
