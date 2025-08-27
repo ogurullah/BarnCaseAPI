@@ -21,7 +21,7 @@ function nextUrl() {
   const p = new URLSearchParams(location.search).get('next');
   // only allow same-origin relative paths
   if (p && /^\/(?!\/)/.test(p)) return p;
-  return 'index.html';
+  return 'app.html';
 }
 
 async function login(creds) {

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BarnCase – App</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      background: Canvas;
+      color: CanvasText;
+    }
+    .wrap { max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
+
+    /* auth status colors */
+    #auth-status { border: 1px solid transparent; }
+    #auth-status[data-state="ok"] {
+    color: #15803d !important;
+    background: rgba(16,185,129,.15) !important;
+    border-color: rgba(16,185,129,.35) !important;
+    }
+    #auth-status[data-state="checking"] {
+    color: #b45309 !important;
+    background: rgba(251,191,36,.18) !important;
+    border-color: rgba(251,191,36,.35) !important;
+    }
+
+
+    .topbar {
+      display:flex; align-items:center; justify-content:space-between;
+      padding: 1rem; border:1px solid color-mix(in oklab, CanvasText 12%, transparent);
+      border-radius: 16px; margin-bottom: 1rem;
+    }
+    .chip { padding:.25rem .6rem; border-radius:999px; background: color-mix(in oklab, Canvas 88%, CanvasText 4%); }
+    .stack { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+    .btn {
+      display:inline-block; padding:.6rem .9rem; border-radius:10px; font-weight:600; cursor:pointer;
+      border:1px solid color-mix(in oklab, CanvasText 16%, transparent);
+      background: color-mix(in oklab, Canvas 88%, CanvasText 2%); color: inherit;
+    }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+
+    .card { border:1px solid color-mix(in oklab, CanvasText 12%, transparent); border-radius:16px; padding:1rem; margin:1rem 0; }
+    h2 { margin:0 0 .5rem; }
+
+    pre {
+      background:#111; color:#0f0; padding:1rem; border-radius:12px; overflow:auto; max-height:50vh;
+    }
+
+    table { width:100%; border-collapse: collapse; }
+    th, td { border-top:1px solid color-mix(in oklab, CanvasText 16%, transparent); padding:.5rem .6rem; text-align:left; }
+    th { position: sticky; top: 0; background: color-mix(in oklab, Canvas 92%, CanvasText 2%); }
+
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:1rem; }
+    @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+        <div class="stack" style="gap:1rem">
+            <strong>BarnCaseAPI</strong>
+            <span class="chip"><strong>Username:</strong> <span id="who-name">—</span></span>
+            <span class="chip" id="who-roles">Role: —</span>
+            <span class="chip" id="who-exp">exp: —</span>
+        </div>
+
+        <!-- right side: auth flag + logout -->
+        <div class="stack" style="gap:.5rem">
+            <span id="auth-status" class="chip" data-state="checking" aria-live="polite">Checking…</span>
+            <button class="btn" id="logout-btn">Logout</button>
+        </div>
+    </header>
+
+    <section class="card">
+      <h2>Quick actions</h2>
+      <div class="stack" style="gap:.75rem; flex-wrap:wrap;">
+        <button class="btn" id="btn-whoami">GET /auth/whoami</button>
+        <button class="btn" id="btn-farms">GET /api/farms</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Custom request</h2>
+      <div class="grid">
+        <div>
+          <label>Path</label>
+          <input id="req-path" value="/auth/whoami" style="width:100%;padding:.6rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);" />
+        </div>
+        <div>
+          <label>Method</label>
+          <select id="req-method" style="width:100%;padding:.6rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);">
+            <option>GET</option><option>POST</option><option>PUT</option>
+            <option>PATCH</option><option>DELETE</option>
+          </select>
+        </div>
+      </div>
+      <label>Body (JSON)</label>
+      <textarea id="req-body" rows="6" placeholder='{"example":"value"}' style="width:100%;padding:.6rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);"></textarea>
+      <div style="margin-top:.5rem">
+        <button class="btn" id="send-btn">Send</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Response</h2>
+      <div id="table-out" style="overflow:auto;"></div>
+      <pre id="json-out">ready</pre>
+    </section>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

@@ -34,7 +34,7 @@ function nextUrl() {
   // after sign-up, send them to login
   const p = new URLSearchParams(location.search).get('next');
   if (p && /^\/(?!\/)/.test(p)) return p;
-  return 'login.html';
+  return 'signin.html';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
