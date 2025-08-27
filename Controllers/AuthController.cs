@@ -59,9 +59,9 @@ public sealed class AuthController : ControllerBase
         return Ok(new TokenResponse(jwt, exp, rt.Token));
     }
 
+    [AllowAnonymous]
     [HttpPost("login")]
     [ProducesResponseType(typeof(TokenResponse), StatusCodes.Status200OK)]
-    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         var user = await _Database.Users.FirstOrDefaultAsync(u => u.Name == request.Name);

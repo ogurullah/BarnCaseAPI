@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Register to BarnCase</title>
+  <title>Sign In to BarnCase</title>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -55,32 +55,29 @@
 </head>
 <body>
   <main class="card" role="main" aria-labelledby="title">
-    <h1 id="title">Create account on BarnCase</h1>
-    <form id="register-form" class="form" novalidate>
+    <h1 id="title">Sign In to BarnCase</h1>
+    <form id="login-form" class="form" novalidate>
       <label for="name">Username</label>
       <input id="name" name="name" type="text" autocomplete="username" required />
 
       <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="new-password" required />
-
-      <label for="confirm">Confirm password</label>
-      <input id="confirm" name="confirm" type="password" autocomplete="new-password" required />
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
 
       <div class="actions">
-        <button id="register-btn" type="submit">Register</button>
+        <button id="login-btn" type="submit">Sign In</button>
       </div>
     </form>
 
     <div class="links">
       <a href="index.html">← Back</a>
-      <a href="signin.html">Already have an account? Sign in →</a>
+      <a href="register.html">Create an account →</a>
     </div>
 
     <div id="msg" role="status" aria-live="polite"></div>
-    <noscript><p>Please enable JavaScript to register.</p></noscript>
+    <noscript><p>Please enable JavaScript to log in.</p></noscript>
   </main>
 
-  <!-- external script -->
-  <script src="register.js" defer></script>
+  <!-- external script only -->
+  <script src="signin.js" defer></script>
 </body>
 </html>
