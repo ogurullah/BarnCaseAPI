@@ -20,6 +20,19 @@ function esc(s) {
 // state for future filtering
 const farmsState = { list: [], selectedId: null };
 
+// balance helpers
+function toNumberOrNull(v) {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function setBalanceChip(val) {
+  const el = document.getElementById('who-balance');
+  if (!el) return;
+  if (val === null || val === undefined) { el.textContent = '—'; return; }
+  // Locale-friendly number. No currency symbol (unknown).
+  el.textContent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(val);
+}
 
 // jwt token functions
 // reading, refreshing and saving tokens
@@ -144,6 +157,19 @@ async function runWhoAmIOnce() {
     const uri = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
     setRolesChip(r.body.claims.filter(c => c.Type === 'role' || c.Type === uri).map(c => c.Value));
     }
+    // try to read a balance from whoami; support a few likely shapes
+    // r.body.balance, r.body.accountBalance, r.body.wallet.balance, r.body.credits, etc.
+    let bal = null;
+    const b = r?.body ?? {};
+    const candidates = [
+      b.balance, b.accountBalance, b.Balance, b.AccountBalance, b.credits, b.Credits,
+      b.wallet?.balance, b.Wallet?.Balance, b.profile?.balance, b.user?.balance
+    ];
+    for (const c of candidates) {
+      const n = toNumberOrNull(c);
+      if (n !== null) { bal = n; break; }
+    }
+    setBalanceChip(bal);
   } catch (e) {
     setAuthStatus('bad');
     showJson(e);
@@ -243,7 +269,7 @@ function reflectUserFromToken(token) {
   $('#who-name').textContent = p?.name || p?.unique_name || p?.sub || '—';
   const roles = normalizeRolesFromJwt(p);
   setRolesChip(roles);
-  $('#who-exp').textContent = 'exp: ' + (p?.exp ? new Date(p.exp * 1000).toLocaleString() : 'n/a');
+//  $('#who-exp').textContent = 'exp: ' + (p?.exp ? new Date(p.exp * 1000).toLocaleString() : 'n/a');
 }
 
 // boot
@@ -314,6 +340,27 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('Failed to create farm.');
     } finally {
       createBtn.disabled = false;
+    }
+  });
+
+  // delete farm flow (selected only)
+  const deleteBtn = document.getElementById('btn-delete-farm');
+  if (deleteBtn) deleteBtn.addEventListener('click', async () => {
+    const id = farmsState.selectedId;
+    if (!id) { alert('Select a farm to delete.'); return; }
+    const name = (farmsState.list.find(f => String(f.id ?? f.Id) === String(id))?.name) ?? `#${id}`;
+    if (!confirm(`Are you sure you want to delete farm "${name}"? This cannot be undone.`)) return;
+    deleteBtn.disabled = true;
+    try {
+      await api(`${cfg.farms}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      // clear selection and refresh list
+      farmsState.selectedId = null;
+      await loadMyFarms();
+    } catch (e) {
+      showJson(e);
+      alert('Failed to delete farm.');
+    } finally {
+      deleteBtn.disabled = false;
     }
   });
   

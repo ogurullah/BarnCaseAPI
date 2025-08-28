@@ -120,15 +120,24 @@ public sealed class AuthController : ControllerBase
 
     [Authorize]
     [HttpGet("whoami")]
-    public IActionResult WhoAmI()
+    public async Task<IActionResult> WhoAmI([FromServices] AppDbContext db)
     {
+        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        int.TryParse(idStr, out var userId);
+
+        var balance = await db.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.Balance)       // decimal/float/etc.
+            .FirstOrDefaultAsync();
+
         return Ok(new
         {
             name = User.FindFirstValue(ClaimTypes.Name),
-            id = User.FindFirstValue(ClaimTypes.NameIdentifier),
+            id = idStr,
             isAuthenticated = User.Identity?.IsAuthenticated ?? false,
             roles = User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray(),
-            claims = User.Claims.Select(c => new { c.Type, c.Value })
+            claims = User.Claims.Select(c => new { c.Type, c.Value }),
+            balance                          // ← a single number, not an array
         });
     }
 }

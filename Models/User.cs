@@ -16,7 +16,7 @@ public class User
     [JsonIgnore]
     public byte[] PasswordSalt { get; set; } = default!;
 
-    public decimal Balance { get; set; }
+    public decimal Balance { get; set; } = 1000; // users have 1000 money initially
 
     public List<Farm> Farms { get; set; } = new();
     public List<Ledger> Ledger { get; set; } = new();
