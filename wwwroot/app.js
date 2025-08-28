@@ -10,7 +10,9 @@ const cfg = {
   animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`,
   animalsBuy: '/api/animals/buy',
   animalSell: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell`,
-  animalSellQuote: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell-quote`
+  animalSellQuote: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell-quote`,
+  productsMine: '/api/products/mine',
+  productsByFarm: (farmId) => `/api/products/view?farmId=${encodeURIComponent(farmId)}`
 };
 
 const $ = s => document.querySelector(s);
@@ -35,6 +37,7 @@ function esc(s) {
 // state for future filtering
 const farmsState = { list: [], selectedId: null };
 const animalsState = { counts: [], selectedKind: null };
+const productsState = { counts: [] };
 
 // balance helpers
 function toNumberOrNull(v) {
@@ -298,6 +301,57 @@ async function loadAnimals() {
   }
 }
 
+// --- Products helpers ---
+// your API names are “milk 1, eggs 2, wool 3”. handle numbers or strings.
+const PRODUCT_NAME_MAP = { 1: 'Milk', 2: 'Eggs', 3: 'Wool' };
+function nameFromProduct(p) {
+  let v = p?.name ?? p?.Name ?? p?.type ?? p?.Type ?? p?.kind ?? p?.Kind;
+  if (v === null || v === undefined) return 'Unknown';
+  // numeric → map to label
+  const n = typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? Number(v) : NaN);
+  if (!Number.isNaN(n) && PRODUCT_NAME_MAP[n]) return PRODUCT_NAME_MAP[n];
+  return String(v);
+}
+function countByProductName(arr) {
+  const map = new Map();
+  for (const p of (Array.isArray(arr) ? arr : [])) {
+    const k = String(nameFromProduct(p));
+    map.set(k, (map.get(k) ?? 0) + 1);
+  }
+  return Array.from(map, ([name, count]) => ({ name, count }));
+}
+function renderProducts() {
+  const host = document.getElementById('products-list');
+  if (!host) return;
+  const list = Array.isArray(productsState.counts) ? productsState.counts : [];
+  if (list.length === 0) {
+    host.innerHTML = `<span class="chip">No products found.</span>`;
+    return;
+  }
+  host.innerHTML = list
+    .map(x => `<span class="chip">${esc(x.name)} × ${esc(x.count)}</span>`)
+    .join('');
+}
+async function loadProducts() {
+  const host = document.getElementById('products-list');
+  if (host) host.innerHTML = `<span class="chip">Loading…</span>`;
+  try {
+    if (farmsState.selectedId) {
+      const r = await api(cfg.productsByFarm(farmsState.selectedId));
+      productsState.counts = countByProductName(Array.isArray(r?.body) ? r.body : []);
+    } else {
+      const r = await api(cfg.productsMine);
+      productsState.counts = Array.isArray(r?.body) ? r.body : [];
+      // normalize server payload shape if needed
+      // expected: [{ name: 'Milk', count: 3 }, ...]
+    }
+    renderProducts();
+  } catch (e) {
+    if (host) host.innerHTML = `<span class="chip">Failed to load.</span>`;
+    showJson(e);
+  }
+}
+
 // --- My Farms box logic ---
 function renderFarms() {
   const host = document.getElementById('farms-list');
@@ -365,7 +419,7 @@ async function boot() {
       $('#who-name').textContent = r.body.name || $('#who-name').textContent;
       showJson(r.body);
     }
-    await Promise.all(loadMyFarms(), loadAnimals());
+    await Promise.all([loadMyFarms(), loadAnimals(), loadProducts()]);
   } catch (e) {
     showJson(e);
   }
@@ -449,7 +503,12 @@ document.addEventListener('DOMContentLoaded', () => {
     farmsState.selectedId = (String(farmsState.selectedId) === String(id)) ? null : id;
     renderFarms();
     loadAnimals();
+    loadProducts();
   });
+
+  // products manual refresh
+  const refreshProductsBtn = document.getElementById('btn-refresh-products');
+  if (refreshProductsBtn) refreshProductsBtn.addEventListener('click', loadProducts);
 
   const refreshAnimalsBtn = document.getElementById('btn-refresh-animals');
   if (refreshAnimalsBtn) refreshAnimalsBtn.addEventListener('click', loadAnimals);

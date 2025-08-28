@@ -55,10 +55,25 @@ public class ProductService
         return Math.Round(total, 2);
     }
 
-    public async Task<IEnumerable<Product>> GetProductsByFarmAsync(int farmId)
+    public async Task<IReadOnlyList<Product>> GetProductsByFarmAsync(int farmId)
     {
-        return await _Database.Products
-            .Where(p => p.FarmId == farmId && !p.isSold)
+        var rows = await _Database.Products
+            .Where(p => p.FarmId == farmId)
+            .AsNoTracking()
             .ToListAsync();
+
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<(string Name, int Count)>> GetProductCountsForUserAsync(int userId)
+    {
+        var rows = await _Database.Products
+            .Where(p => p.Farm.OwnerId == userId)
+            .GroupBy(p => p.Type)
+            .Select(g => new { Name = g.Key.ToString(), Count = g.Count() })
+            .AsNoTracking()
+            .ToListAsync();
+
+        return rows.Select(r => (r.Name, r.Count)).ToList();
     }
 }

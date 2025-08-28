@@ -3,6 +3,7 @@ using BarnCaseAPI.Models;
 using Microsoft.AspNetCore.Mvc;
 using BarnCaseAPI.Security;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace BarnCaseAPI.Controllers;
 
@@ -29,5 +30,18 @@ public class ProductsController : ControllerBase
     {
         var products = await _productService.GetProductsByFarmAsync(farmId);
         return Ok(products);
+    }
+
+    // GET /api/products/mine -> [{ name, count }]
+    [Authorize]
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<object>>> GetMine()
+    {
+        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!int.TryParse(idStr, out var userId)) return Ok(Array.Empty<object>());
+
+        var rows = await _productService.GetProductCountsForUserAsync(userId);
+        var payload = rows.Select(r => new { name = r.Name, count = r.Count });
+        return Ok(payload);
     }
 }

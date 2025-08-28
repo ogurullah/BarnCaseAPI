@@ -47,6 +47,17 @@ public class AnimalsController : ControllerBase
         var dict = await _animals.GetAnimalCountsForUserAsync(userId);
         return Ok(dict.Select(kv => new { kind = kv.Key, count = kv.Value }));
     }
+
+    [Authorize]
+    [HttpGet("{animalId:int}/sell-quote")]
+    public async Task<ActionResult<object>> GetSellQuote([FromRoute] int animalId)
+    {
+        var userId = User.UserId();
+        var price = await _animals.GetSellQuoteAsync(userId, animalId);
+        if (price is null) return NotFound();
+        return Ok(new { price = price.Value });
+    }
+
 }
 
 public record BuyAnimalRequest(AnimalSpecies Species);
