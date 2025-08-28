@@ -8,7 +8,9 @@ const cfg = {
   farmsMine: '/api/farms/mine',
   animalsMine: '/api/animals/mine',
   animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`,
-  animalsBuy: '/api/animals/buy'
+  animalsBuy: '/api/animals/buy',
+  animalSell: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell`,
+  animalSellQuote: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell-quote`
 };
 
 const $ = s => document.querySelector(s);
@@ -32,7 +34,7 @@ function esc(s) {
 
 // state for future filtering
 const farmsState = { list: [], selectedId: null };
-const animalsState = { counts: []};
+const animalsState = { counts: [], selectedKind: null };
 
 // balance helpers
 function toNumberOrNull(v) {
@@ -263,9 +265,17 @@ function renderAnimals() {
     host.innerHTML = `<span class="chip">No animals found.</span>`;
     return;
   }
-  host.innerHTML = list
-    .map(x => `<span class="chip">${esc(x.kind)} × ${esc(x.count)}</span>`)
-    .join('');
+  host.innerHTML = list.map(x => {
+    const selected = String(animalsState.selectedKind ?? '') === String(x.kind ?? '');
+    const pressed = selected ? 'true' : 'false';
+    return `<button class="btn"
+              data-animal-kind="${esc(x.kind)}"
+              ${selected ? 'data-selected="true"' : ''}
+              aria-pressed="${pressed}"
+              title="${selected ? 'Selected – click to deselect' : 'Click to select'}">
+              ${esc(x.kind)} × ${esc(x.count)}
+            </button>`;
+  }).join('');
 }
 async function loadAnimals() {
   const host = document.getElementById('animals-list');
@@ -502,6 +512,85 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  async function pickOldestAnimalId(farmId, kind) {
+    // fetch animals for farm
+    const r = await api(cfg.animalsByFarm(farmId));
+    const animals = Array.isArray(r?.body) ? r.body : [];
+    // Normalize species/kind
+    const matches = animals.filter(a => {
+      const species = a?.species ?? a?.Species ?? a?.kind ?? a?.Kind;
+      return String(species) === String(kind);
+    });
+    if (matches.length === 0) return null;
+
+    // Sort by RemainingLifeDays ascending (oldest first). Fallback to PurchasedAt ascending.
+    matches.sort((a, b) => {
+      const ra = (a?.remainingLifeDays ?? a?.RemainingLifeDays ?? Infinity);
+      const rb = (b?.remainingLifeDays ?? b?.RemainingLifeDays ?? Infinity);
+      if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) return ra - rb;
+      const pa = new Date(a?.purchasedAt ?? a?.PurchasedAt ?? 0).getTime();
+      const pb = new Date(b?.purchasedAt ?? b?.PurchasedAt ?? 0).getTime();
+      return pa - pb;
+    });
+
+    const id = matches[0]?.id ?? matches[0]?.Id ?? null;
+    return id;
+  }
+
+
+  // Select/deselect animal kind
+  const animalsList = document.getElementById('animals-list');
+  if (animalsList) animalsList.addEventListener('click', (e) => {
+    let node = e.target;
+    if (!(node instanceof Element)) node = node?.parentElement;
+    const btn = node?.closest('button[data-animal-kind]');
+    if (!btn) return;
+    const kind = btn.getAttribute('data-animal-kind');
+    animalsState.selectedKind =
+      (String(animalsState.selectedKind) === String(kind)) ? null : kind;
+    renderAnimals();
+  });
+
+  // SELL flow
+  const sellBtn = document.getElementById('btn-sell-animal');
+  if (sellBtn) sellBtn.addEventListener('click', async () => {
+    const farmId = farmsState.selectedId;
+    if (!farmId) { alert('Select a farm first.'); return; }
+    const kind = animalsState.selectedKind;
+    if (!kind) { alert('Select an animal kind in the list.'); return; }
+    sellBtn.disabled = true;
+    try {
+      const animalId = await pickOldestAnimalId(farmId, kind);
+      if (!animalId) { alert(`No ${kind} found in this farm.`); return; }
+
+      // fetch quote
+      let price = null;
+      try {
+        const qr = await api(cfg.animalSellQuote(animalId));
+        price = qr?.body?.price ?? qr?.body?.Price ?? null;
+      } catch { /* quote optional */ }
+
+      const message = (price != null)
+        ? `Do you want to sell a ${kind} for ${price}?`
+        : `Do you want to sell a ${kind}?`;
+      if (!confirm(message)) return;
+
+      // perform sell
+      const sr = await api(cfg.animalSell(animalId), { method: 'POST' });
+      // sr.body.earned may exist; show a toast/alert if you want
+      // Refresh animals + balance
+      await loadAnimals();
+      try {
+        const r = await api(cfg.whoami);
+        setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
+      } catch {}
+    } catch (e) {
+      showJson(e);
+      alert('Failed to sell animal.');
+    } finally {
+      sellBtn.disabled = false;
+    }
+  });
 
   boot();
   runWhoAmIOnce();

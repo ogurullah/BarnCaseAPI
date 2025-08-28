@@ -127,9 +127,38 @@ public class AnimalService
             .Where(a => a.Farm.OwnerId == userId)
             .GroupBy(a => a.Species)
             .Select(g => new { Species = g.Key!, Count = g.Count() })
-            .AsNoTracking() 
+            .AsNoTracking()
             .ToListAsync();
 
         return rows.ToDictionary(x => x.Species.ToString(), x => x.Count);
     }
+    
+    public async Task<decimal?> GetSellQuoteAsync(int userId, int animalId)
+    {
+        // pull the animal owned by user (via farm relationship)
+        var animal = await _Database.Animals
+            .Where(a => a.Id == animalId && a.Farm.OwnerId == userId)
+            .Select(a => new {
+                a.Id, a.Species, a.PurchasePrice, a.PurchasedAt, a.RemainingLifeDays, a.LifeSpanInDays
+            })
+            .AsNoTracking()
+            .FirstOrDefaultAsync();
+
+        if (animal is null) return null;
+
+        // Example pricing logic — replace with your real formula if different.
+        // Here: linear depreciation on remaining life; never below 0.
+        decimal basePrice = animal.PurchasePrice;
+        if (animal.LifeSpanInDays > 0)
+        {
+            var used = Math.Clamp(animal.LifeSpanInDays - animal.RemainingLifeDays, 0, animal.LifeSpanInDays);
+            var remainingRatio = (decimal)(animal.LifeSpanInDays - used) / animal.LifeSpanInDays;
+            var price = Math.Max(0m, Math.Round(basePrice * remainingRatio, 2));
+            return price;
+        }
+
+        // Fallback: 50% of purchase price
+        return Math.Round(basePrice * 0.5m, 2);
+    }
+
 }
