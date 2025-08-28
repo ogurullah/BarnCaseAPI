@@ -46,6 +46,20 @@
     }
     .btn:disabled { opacity: .6; cursor: not-allowed; }
 
+    /* Selected/toggle state: much stronger contrast + ring */
+    .btn[data-selected="true"],
+    .btn[aria-pressed="true"] {
+      background: color-mix(in oklab, Canvas 78%, CanvasText 14%);
+      border-color: color-mix(in oklab, CanvasText 40%, transparent);
+      box-shadow:
+        0 0 0 2px color-mix(in oklab, Canvas 96%, CanvasText 8%) inset,
+        0 0 0 2px color-mix(in oklab, CanvasText 28%, transparent);
+    }
+    .btn[aria-pressed="true"]:focus-visible {
+      outline: 2px solid color-mix(in oklab, CanvasText 45%, transparent);
+      outline-offset: 2px;
+    }
+
     .card { border:1px solid color-mix(in oklab, CanvasText 12%, transparent); border-radius:16px; padding:1rem; margin:1rem 0; }
     h2 { margin:0 0 .5rem; }
 
@@ -89,7 +103,8 @@
     <section class="card" id="my-farms-card">
       <div class="stack" style="justify-content:space-between">
         <h2 style="margin:0">My Farms</h2>
-        <div class="stack">
+         <div class="stack">
+           <button class="btn" id="btn-create-farm">Create Farm</button>
           <button class="btn" id="btn-refresh-farms">Refresh</button>
         </div>
       </div>

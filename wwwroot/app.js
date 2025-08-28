@@ -115,7 +115,7 @@ function setRolesChip(roles) {
   const el = document.getElementById('who-roles');
   if (!el) return;
   const list = Array.isArray(roles) ? roles : (roles ? [roles] : []);
-  el.textContent = (list.length > 1 ? 's' : '') + (list.length ? list.join(', ') : '—');
+  el.textContent = list.length ? list.join(', ') : '—';
 }
 
 function setAuthStatus(state) {
@@ -212,7 +212,9 @@ function renderFarms() {
     const id = f.id ?? f.Id ?? f.farmId ?? f.FarmId;
     const name = f.name ?? f.Name ?? `Farm #${id ?? '—'}`;
     const selected = String(farmsState.selectedId ?? '') === String(id ?? '');
-    return `<button class="btn" data-farmid="${esc(id)}" ${selected ? 'data-selected="true"' : ''}>${esc(name)}</button>`;
+    const pressed = selected ? 'true' : 'false';
+    const check = selected ? '✓ ' : '';
+    return `<button class="btn" data-farmid="${esc(id)}" ${selected ? 'data-selected="true"' : ''} aria-pressed="${pressed}" title="${selected ? 'Selected – click to deselect' : 'Click to select'}">${check}${esc(name)}</button>`;
   }).join('');
   host.innerHTML = html;
 }
@@ -291,12 +293,41 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshBtn = document.getElementById('btn-refresh-farms');
   if (refreshBtn) refreshBtn.addEventListener('click', loadMyFarms);
 
-  // click-to-select (future filtering will use farmsState.selectedId)
+  // create farm flow
+  const createBtn = document.getElementById('btn-create-farm');
+  if (createBtn) createBtn.addEventListener('click', async () => {
+    const name = (prompt('New farm name:') || '').trim();
+    if (!name) return; // user cancelled or empty
+    createBtn.disabled = true;
+    try {
+      const r = await api(cfg.farms, {
+        method: 'POST',
+        body: { farmName: name }
+      });
+      // Try to pick the new farm’s id/name from the response
+      const created = r?.body || {};
+      const newId = created.id ?? created.Id ?? created.farmId ?? created.FarmId ?? null;
+      farmsState.selectedId = newId;
+      await loadMyFarms();
+    } catch (e) {
+      showJson(e);
+      alert('Failed to create farm.');
+    } finally {
+      createBtn.disabled = false;
+    }
+  });
+  
+  // click-to-toggle select
   const farmsList = document.getElementById('farms-list');
   if (farmsList) farmsList.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-farmid]');
+    // clicks can originate from text nodes; normalize to an Element
+    let node = e.target;
+    if (!(node instanceof Element)) node = node.parentElement;
+    if (!node) return;
+    const btn = node.closest('button[data-farmid]');
     if (!btn) return;
-    farmsState.selectedId = btn.getAttribute('data-farmid');
+    const id = btn.getAttribute('data-farmid');
+    farmsState.selectedId = (String(farmsState.selectedId) === String(id)) ? null : id;
     renderFarms();
   });
 
