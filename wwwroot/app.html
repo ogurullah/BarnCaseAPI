@@ -27,6 +27,10 @@
     border-color: rgba(251,191,36,.35) !important;
     }
 
+    .btn[data-selected="true"] {
+      background: color-mix(in oklab, Canvas 84%, CanvasText 6%);
+      border-color: color-mix(in oklab, CanvasText 26%, transparent);
+    }
 
     .topbar {
       display:flex; align-items:center; justify-content:space-between;
@@ -63,7 +67,7 @@
         <div class="stack" style="gap:1rem">
             <strong>BarnCaseAPI</strong>
             <span class="chip"><strong>Username:</strong> <span id="who-name">—</span></span>
-            <span class="chip" id="who-roles">Role: —</span>
+            <span class="chip"><strong>Role:</strong> <span id="who-roles">—</span></span>
             <span class="chip" id="who-exp">exp: —</span>
         </div>
 
@@ -82,25 +86,15 @@
       </div>
     </section>
 
-    <section class="card">
-      <h2>Custom request</h2>
-      <div class="grid">
-        <div>
-          <label>Path</label>
-          <input id="req-path" value="/auth/whoami" style="width:100%;padding:.6rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);" />
-        </div>
-        <div>
-          <label>Method</label>
-          <select id="req-method" style="width:100%;padding:.6rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);">
-            <option>GET</option><option>POST</option><option>PUT</option>
-            <option>PATCH</option><option>DELETE</option>
-          </select>
+    <section class="card" id="my-farms-card">
+      <div class="stack" style="justify-content:space-between">
+        <h2 style="margin:0">My Farms</h2>
+        <div class="stack">
+          <button class="btn" id="btn-refresh-farms">Refresh</button>
         </div>
       </div>
-      <label>Body (JSON)</label>
-      <textarea id="req-body" rows="6" placeholder='{"example":"value"}' style="width:100%;padding:.6rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);"></textarea>
-      <div style="margin-top:.5rem">
-        <button class="btn" id="send-btn">Send</button>
+      <div id="farms-list" class="stack" style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
+        <span class="chip">Loading…</span>
       </div>
     </section>
 

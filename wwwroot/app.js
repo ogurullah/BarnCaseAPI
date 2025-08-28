@@ -4,13 +4,22 @@
 const cfg = {
   whoami: '/auth/whoami',
   refresh: '/auth/refresh',
-  farms: '/api/farms'
+  farms: '/api/farms',
+  farmsMine: '/api/farms/mine'
 };
-
 
 const $ = s => document.querySelector(s);
 const jsonOut = $('#json-out');
 const tableOut = $('#table-out');
+
+// simple HTML escaper to render names safely
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// state for future filtering
+const farmsState = { list: [], selectedId: null };
+
 
 // jwt token functions
 // reading, refreshing and saving tokens
@@ -106,16 +115,17 @@ function setRolesChip(roles) {
   const el = document.getElementById('who-roles');
   if (!el) return;
   const list = Array.isArray(roles) ? roles : (roles ? [roles] : []);
-  el.textContent = 'roles: ' + (list.length ? list.join(', ') : '—');
+  el.textContent = (list.length > 1 ? 's' : '') + (list.length ? list.join(', ') : '—');
 }
 
-function setAuthStatus(state) { // 'ok' | 'bad' | 'checking'
+function setAuthStatus(state) {
   const el = document.getElementById('auth-status');
   if (!el) return;
   el.dataset.state = state;
-  el.textContent = state === 'ok' ? 'Authorized'
-                  : state === 'checking' ? 'Checking'
-                  : 'Unauthorized';
+  el.textContent =
+    state === 'ok' ? 'Authorized' :
+    state === 'checking' ? 'Checking…' :
+    'Unauthorized';
 }
 
 // run for getting user session data and authorization info
@@ -150,9 +160,9 @@ async function api(path, { method='GET', body=null, headers={} } = {}) {
   }
   if (token) h['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(path, { method, headers: h, body });
+  let res = await fetch(path, { method, headers: h, body });
 
-  const text = await res.text();
+  let text = await res.text();
   let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
   if (res.status === 401) {
@@ -189,6 +199,42 @@ function renderTable(arr) {
   jsonOut.textContent = JSON.stringify(arr, null, 2);
 }
 
+// --- My Farms box logic ---
+function renderFarms() {
+  const host = document.getElementById('farms-list');
+  if (!host) return;
+  const farms = Array.isArray(farmsState.list) ? farmsState.list : [];
+  if (farms.length === 0) {
+    host.innerHTML = `<span class="chip">No farms found.</span>`;
+    return;
+  }
+  const html = farms.map(f => {
+    const id = f.id ?? f.Id ?? f.farmId ?? f.FarmId;
+    const name = f.name ?? f.Name ?? `Farm #${id ?? '—'}`;
+    const selected = String(farmsState.selectedId ?? '') === String(id ?? '');
+    return `<button class="btn" data-farmid="${esc(id)}" ${selected ? 'data-selected="true"' : ''}>${esc(name)}</button>`;
+  }).join('');
+  host.innerHTML = html;
+}
+
+async function loadMyFarms() {
+  const host = document.getElementById('farms-list');
+  if (host) host.innerHTML = `<span class="chip">Loading…</span>`;
+  try {
+    const r = await api(cfg.farmsMine);
+    farmsState.list = Array.isArray(r?.body) ? r.body : [];
+    // preserve selection if it still exists
+    if (!farmsState.list.some(f => String(f.id ?? f.Id) === String(farmsState.selectedId))) {
+      farmsState.selectedId = null;
+    }
+    renderFarms();
+  } catch (e) {
+    if (host) host.innerHTML = `<span class="chip">Failed to load.</span>`;
+    showJson(e);
+  }
+}
+
+
 // updates info on header from jwt token
 function reflectUserFromToken(token) {
   const p = decodeJwt(token);
@@ -219,6 +265,7 @@ async function boot() {
       $('#who-name').textContent = r.body.name || $('#who-name').textContent;
       showJson(r.body);
     }
+    await loadMyFarms();
   } catch (e) {
     showJson(e);
   }
@@ -240,18 +287,21 @@ document.addEventListener('DOMContentLoaded', () => {
     catch (e) { showJson(e); }
   });
 
-  $('#send-btn').addEventListener('click', async () => {
-    const path = $('#req-path').value.trim();
-    const method = $('#req-method').value.trim();
-    const raw = $('#req-body').value.trim();
-    let body = null;
-    if (raw) { try { body = JSON.parse(raw); } catch { showJson({ error:'Body is not valid JSON' }); return; } }
-    try { const r = await api(path, { method, body }); (Array.isArray(r.body) ? renderTable : showJson)(r.body); }
-    catch (e) { showJson(e); }
+  // refresh farms on demand
+  const refreshBtn = document.getElementById('btn-refresh-farms');
+  if (refreshBtn) refreshBtn.addEventListener('click', loadMyFarms);
+
+  // click-to-select (future filtering will use farmsState.selectedId)
+  const farmsList = document.getElementById('farms-list');
+  if (farmsList) farmsList.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-farmid]');
+    if (!btn) return;
+    farmsState.selectedId = btn.getAttribute('data-farmid');
+    renderFarms();
   });
 
+  // keep it to a single pass:
   boot();
-  setAuthStatus('checking');
   runWhoAmIOnce();
   scheduleRefresh();
 });
