@@ -7,7 +7,8 @@ const cfg = {
   farms: '/api/farms',
   farmsMine: '/api/farms/mine',
   animalsMine: '/api/animals/mine',
-  animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`
+  animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`,
+  animalsBuy: '/api/animals/buy'
 };
 
 const $ = s => document.querySelector(s);
@@ -18,7 +19,11 @@ const speciesMap = {
   2: 'Chicken',
   3: 'Sheep',
 };
-
+const SPECIES_PRICES = {
+  Cow: 500,
+  Chicken: 50,
+  Sheep: 200
+};
 
 // simple HTML escaper to render names safely
 function esc(s) {
@@ -320,7 +325,6 @@ async function loadMyFarms() {
   }
 }
 
-
 // updates info on header from jwt token
 function reflectUserFromToken(token) {
   const p = decodeJwt(token);
@@ -440,7 +444,65 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshAnimalsBtn = document.getElementById('btn-refresh-animals');
   if (refreshAnimalsBtn) refreshAnimalsBtn.addEventListener('click', loadAnimals);
 
-  // keep it to a single pass:
+  function updateBuyPriceChip() {
+    const sel = document.getElementById('buy-species');
+    const chip = document.getElementById('buy-price-chip');
+    if (!sel || !chip) return;
+    const price = SPECIES_PRICES[sel.value];
+    chip.textContent = 'Price: ' + (price != null ? String(price) : '—');
+  }
+  function showBuyPanel() {
+    const panel = document.getElementById('buy-panel');
+    if (!panel) return;
+    panel.hidden = false;
+    updateBuyPriceChip();
+    document.getElementById('buy-species')?.focus();
+  }
+  function hideBuyPanel() {
+    const panel = document.getElementById('buy-panel');
+    if (panel) panel.hidden = true;
+  }
+
+  // BUY: show the inline picker only when clicked
+  document.getElementById('btn-buy-animal')?.addEventListener('click', () => {
+    if (!farmsState.selectedId) { alert('Select a farm first.'); return; }
+    showBuyPanel();
+  });
+  // BUY: live price update on species change
+  document.getElementById('buy-species')?.addEventListener('change', updateBuyPriceChip);
+  // BUY: cancel hides the panel
+  document.getElementById('buy-cancel')?.addEventListener('click', hideBuyPanel);
+  // BUY: confirm purchase
+  document.getElementById('buy-confirm')?.addEventListener('click', async () => {
+    const farmId = farmsState.selectedId;
+    if (!farmId) { alert('Select a farm first.'); hideBuyPanel(); return; }
+    const species = document.getElementById('buy-species')?.value || 'Sheep';
+    const price = SPECIES_PRICES[species];
+    if (!confirm(`Do you want to buy a ${species} for ${price}?`)) return;
+
+    const btn = document.getElementById('buy-confirm');
+    if (btn) btn.disabled = true;
+    try {
+      await api(`${cfg.animalsBuy}?farmId=${encodeURIComponent(farmId)}`, {
+        method: 'POST',
+        body: { species }
+      });
+      hideBuyPanel();
+      await loadAnimals(); // reflect new counts
+      // refresh balance chip (since buying costs money)
+      try {
+        const r = await api(cfg.whoami);
+        setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
+      } catch {}
+    } catch (e) {
+      showJson(e);
+      alert('Failed to buy animal.');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+
   boot();
   runWhoAmIOnce();
   scheduleRefresh();

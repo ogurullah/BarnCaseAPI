@@ -60,6 +60,9 @@
       outline-offset: 2px;
     }
 
+    /* ensure hidden panel really hides */
+    #buy-panel[hidden]{ display:none !important; }
+
     .card { border:1px solid color-mix(in oklab, CanvasText 12%, transparent); border-radius:16px; padding:1rem; margin:1rem 0; }
     h2 { margin:0 0 .5rem; }
 
@@ -119,8 +122,19 @@
         <h2 style="margin:0">Animals</h2>
         <div class="stack">
           <button class="btn" id="btn-refresh-animals">Refresh</button>
+          <button class="btn" id="btn-buy-animal">Buy Animal</button>
         </div>
       </div>
+      <div id="buy-panel" class="stack" hidden style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
+        <select id="buy-species" style="padding:.5rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);">
+        <option value="Cow">Cow</option>
+        <option value="Chicken">Chicken</option>
+        <option value="Sheep">Sheep</option>
+      </select>
+      <span class="chip" id="buy-price-chip">Price: —</span>
+      <button class="btn" id="buy-confirm">OK</button>
+      <button class="btn" id="buy-cancel">Cancel</button>
+     </div>
       <div id="animals-list" class="stack" style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
         <span class="chip">Loading…</span>
       </div>
