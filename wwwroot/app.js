@@ -5,12 +5,20 @@ const cfg = {
   whoami: '/auth/whoami',
   refresh: '/auth/refresh',
   farms: '/api/farms',
-  farmsMine: '/api/farms/mine'
+  farmsMine: '/api/farms/mine',
+  animalsMine: '/api/animals/mine',
+  animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`
 };
 
 const $ = s => document.querySelector(s);
 const jsonOut = $('#json-out');
 const tableOut = $('#table-out');
+const speciesMap = {
+  1: 'Cow',
+  2: 'Chicken',
+  3: 'Sheep',
+};
+
 
 // simple HTML escaper to render names safely
 function esc(s) {
@@ -19,6 +27,7 @@ function esc(s) {
 
 // state for future filtering
 const farmsState = { list: [], selectedId: null };
+const animalsState = { counts: []};
 
 // balance helpers
 function toNumberOrNull(v) {
@@ -225,6 +234,55 @@ function renderTable(arr) {
   jsonOut.textContent = JSON.stringify(arr, null, 2);
 }
 
+// --- Animals helpers ---
+function kindFromAnimal(a) {
+  let v = a?.kind ?? a?.Kind ?? a?.species ?? a?.Species ?? a?.type ?? a?.Type;
+  if (v === null || v === undefined) return 'Unknown';
+  const n = typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? Number(v) : NaN);
+  if (!Number.isNaN(n) && speciesMap[n]) return speciesMap[n];
+  return String(v);
+}
+function countByKind(arr) {
+  const map = new Map();
+  for (const a of (Array.isArray(arr) ? arr : [])) {
+    const k = String(kindFromAnimal(a));
+    map.set(k, (map.get(k) ?? 0) + 1);
+  }
+  return Array.from(map, ([kind, count]) => ({ kind, count }));
+}
+function renderAnimals() {
+  const host = document.getElementById('animals-list');
+  if (!host) return;
+  const list = Array.isArray(animalsState.counts) ? animalsState.counts : [];
+  if (list.length === 0) {
+    host.innerHTML = `<span class="chip">No animals found.</span>`;
+    return;
+  }
+  host.innerHTML = list
+    .map(x => `<span class="chip">${esc(x.kind)} × ${esc(x.count)}</span>`)
+    .join('');
+}
+async function loadAnimals() {
+  const host = document.getElementById('animals-list');
+  if (host) host.innerHTML = `<span class="chip">Loading…</span>`;
+  try {
+    // If a farm is selected: pull animals for that farm, then aggregate client-side
+    if (farmsState.selectedId) {
+      const r = await api(cfg.animalsByFarm(farmsState.selectedId));
+      const counts = countByKind(Array.isArray(r?.body) ? r.body : []);
+      animalsState.counts = counts;
+    } else {
+      // No farm selected: use the server-side aggregated endpoint
+      const r = await api(cfg.animalsMine);
+      animalsState.counts = Array.isArray(r?.body) ? r.body : [];
+    }
+    renderAnimals();
+  } catch (e) {
+    if (host) host.innerHTML = `<span class="chip">Failed to load.</span>`;
+    showJson(e);
+  }
+}
+
 // --- My Farms box logic ---
 function renderFarms() {
   const host = document.getElementById('farms-list');
@@ -293,7 +351,7 @@ async function boot() {
       $('#who-name').textContent = r.body.name || $('#who-name').textContent;
       showJson(r.body);
     }
-    await loadMyFarms();
+    await Promise.all(loadMyFarms(), loadAnimals());
   } catch (e) {
     showJson(e);
   }
@@ -376,7 +434,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const id = btn.getAttribute('data-farmid');
     farmsState.selectedId = (String(farmsState.selectedId) === String(id)) ? null : id;
     renderFarms();
+    loadAnimals();
   });
+
+  const refreshAnimalsBtn = document.getElementById('btn-refresh-animals');
+  if (refreshAnimalsBtn) refreshAnimalsBtn.addEventListener('click', loadAnimals);
 
   // keep it to a single pass:
   boot();

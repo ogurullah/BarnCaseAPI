@@ -104,12 +104,24 @@
       <div class="stack" style="justify-content:space-between">
         <h2 style="margin:0">My Farms</h2>
          <div class="stack">
-          <button class="btn" id="btn-create-farm">Create Farm</button>
           <button class="btn" id="btn-refresh-farms">Refresh</button>
+          <button class="btn" id="btn-create-farm">Create Farm</button>
           <button class="btn" id="btn-delete-farm">Delete Farm</button>
         </div>
       </div>
       <div id="farms-list" class="stack" style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
+        <span class="chip">Loading…</span>
+      </div>
+    </section>
+
+    <section class="card" id="animals-card">
+      <div class="stack" style="justify-content:space-between">
+        <h2 style="margin:0">Animals</h2>
+        <div class="stack">
+          <button class="btn" id="btn-refresh-animals">Refresh</button>
+        </div>
+      </div>
+      <div id="animals-list" class="stack" style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
         <span class="chip">Loading…</span>
       </div>
     </section>

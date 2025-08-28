@@ -3,6 +3,7 @@ using BarnCaseAPI.Models;
 using Microsoft.AspNetCore.Mvc;
 using BarnCaseAPI.Security;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace BarnCaseAPI.Controllers;
 
@@ -37,6 +38,15 @@ public class AnimalsController : ControllerBase
         return Ok(animals);
     }
 
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<object>>> GetMine()
+    {
+        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!int.TryParse(idStr, out var userId)) return Ok(Array.Empty<object>());
+
+        var dict = await _animals.GetAnimalCountsForUserAsync(userId);
+        return Ok(dict.Select(kv => new { kind = kv.Key, count = kv.Value }));
+    }
 }
 
 public record BuyAnimalRequest(AnimalSpecies Species);

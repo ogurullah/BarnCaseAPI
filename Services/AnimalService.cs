@@ -120,4 +120,16 @@ public class AnimalService
             .Where(a => a.FarmID == farmId)
             .ToListAsync();
     }
+
+    public async Task<Dictionary<string, int>> GetAnimalCountsForUserAsync(int userId)
+    {
+        var rows = await _Database.Animals
+            .Where(a => a.Farm.OwnerId == userId)
+            .GroupBy(a => a.Species)
+            .Select(g => new { Species = g.Key!, Count = g.Count() })
+            .AsNoTracking() 
+            .ToListAsync();
+
+        return rows.ToDictionary(x => x.Species.ToString(), x => x.Count);
+    }
 }
