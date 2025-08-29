@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BarnCase – App</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      background: Canvas;
+      color: CanvasText;
+    }
+    .wrap { max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
+
+    #auth-status { border: 1px solid transparent; }
+    #auth-status[data-state="ok"] {
+    color: #15803d !important;
+    background: rgba(16,185,129,.15) !important;
+    border-color: rgba(16,185,129,.35) !important;
+    }
+    #auth-status[data-state="checking"] {
+    color: #b45309 !important;
+    background: rgba(251,191,36,.18) !important;
+    border-color: rgba(251,191,36,.35) !important;
+    }
+
+    .btn[data-selected="true"] {
+      background: color-mix(in oklab, Canvas 84%, CanvasText 6%);
+      border-color: color-mix(in oklab, CanvasText 26%, transparent);
+    }
+
+    .topbar {
+      display:flex; align-items:center; justify-content:space-between;
+      padding: 1rem; border:1px solid color-mix(in oklab, CanvasText 12%, transparent);
+      border-radius: 16px; margin-bottom: 1rem;
+    }
+
+    .chip { padding:.25rem .6rem; border-radius:999px; background: color-mix(in oklab, Canvas 88%, CanvasText 4%); }
+
+    .stack { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+
+    .btn {
+      display:inline-block; padding:.6rem .9rem; border-radius:10px; font-weight:600; cursor:pointer;
+      border:1px solid color-mix(in oklab, CanvasText 16%, transparent);
+      background: color-mix(in oklab, Canvas 88%, CanvasText 2%); color: inherit;
+    }
+
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+
+    .btn[data-selected="true"],
+    .btn[aria-pressed="true"] {
+      background: color-mix(in oklab, Canvas 78%, CanvasText 14%);
+      border-color: color-mix(in oklab, CanvasText 40%, transparent);
+      box-shadow:
+        0 0 0 2px color-mix(in oklab, Canvas 96%, CanvasText 8%) inset,
+        0 0 0 2px color-mix(in oklab, CanvasText 28%, transparent);
+    }
+
+    .btn[aria-pressed="true"]:focus-visible {
+      outline: 2px solid color-mix(in oklab, CanvasText 45%, transparent);
+      outline-offset: 2px;
+    }
+
+    #buy-panel[hidden]{ display:none !important; }
+
+    .card { border:1px solid color-mix(in oklab, CanvasText 12%, transparent); border-radius:16px; padding:1rem; margin:1rem 0; }
+
+    h2 { margin:0 0 .5rem; }
+
+    pre {
+      background:#111; color:#0f0; padding:1rem; border-radius:12px; overflow:auto; max-height:50vh;
+    }
+
+    table { width:100%; border-collapse: collapse; }
+
+    th, td { border-top:1px solid color-mix(in oklab, CanvasText 16%, transparent); padding:.5rem .6rem; text-align:left; }
+
+    th { position: sticky; top: 0; background: color-mix(in oklab, Canvas 92%, CanvasText 2%); }
+
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:1rem; }
+
+    @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+
+        <div class="stack" style="gap:1rem">
+            <strong>BarnCaseAPI</strong>
+            <span class="chip"><strong>Username:</strong> <span id="who-name">—</span></span>
+            <span class="chip"><strong>Role:</strong> <span id="who-roles">—</span></span>
+            <span class="chip"><strong>Balance:</strong> <span id="who-balance">—</span></span>
+        </div>
+
+        <div class="stack" style="gap:.5rem">
+            <span id="auth-status" class="chip" data-state="checking" aria-live="polite">Checking…</span>
+            <button class="btn" id="logout-btn">Logout</button>
+        </div>
+
+    </header>
+
+    <section class="card" id="my-farms-card">
+
+      <div class="stack" style="justify-content:space-between">
+        <h2 style="margin:0">My Farms</h2>
+
+         <div class="stack">
+          <button class="btn" id="btn-refresh-farms">Refresh</button>
+          <button class="btn" id="btn-create-farm">Create Farm</button>
+          <button class="btn" id="btn-delete-farm">Delete Farm</button>
+        </div>
+
+      </div>
+
+      <div id="farms-list" class="stack" style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
+        <span class="chip">Loading…</span>
+      </div>
+
+    </section>
+
+    <section class="card" id="animals-card">
+
+      <div class="stack" style="justify-content:space-between">
+        <h2 style="margin:0">My Animals</h2>
+
+        <div class="stack">
+          <button class="btn" id="btn-refresh-animals">Refresh</button>
+          <button class="btn" id="btn-buy-animal">Buy Animal</button>
+          <button class="btn" id="btn-sell-animal">Sell Animal</button>
+        </div>
+
+      </div>
+
+      <div id="buy-panel" class="stack" hidden style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
+        <select id="buy-species" style="padding:.5rem;border-radius:10px;border:1px solid color-mix(in oklab, CanvasText 16%, transparent);background: color-mix(in oklab, Canvas 92%, CanvasText 2%);">
+        <option value="Cow">Cow</option>
+        <option value="Chicken">Chicken</option>
+        <option value="Sheep">Sheep</option>
+      </select>
+      <span class="chip" id="buy-price-chip">Price: —</span>
+      <button class="btn" id="buy-confirm">OK</button>
+      <button class="btn" id="buy-cancel">Cancel</button>
+     </div>
+
+      <div id="animals-list" class="stack" style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
+        <span class="chip">Loading…</span>
+      </div>
+
+    </section>
+
+    <section class="card" id="products-card">
+
+      <div class="stack" style="justify-content:space-between">
+        <h2 style="margin:0">My Products</h2>
+
+        <div class="stack">
+          <button class="btn" id="btn-refresh-products">Refresh</button>
+          <button class="btn" id="btn-sell-product">Sell Products</button>
+        </div>
+
+      </div>
+
+      <div id="products-list" class="stack" style="gap:.5rem; flex-wrap:wrap; margin-top:.5rem">
+        <span class="chip">Loading…</span>
+      </div>
+      
+    </section>
+
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

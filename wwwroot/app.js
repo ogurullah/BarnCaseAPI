@@ -1,0 +1,1170 @@
+'use strict';
+
+// api endpoints
+const cfg = {
+  whoami: '/auth/whoami',
+  refresh: '/auth/refresh',
+  farms: '/api/farms',
+  farmsMine: '/api/farms/mine',
+  animalsMine: '/api/animals/mine',
+  animalsBuy: '/api/animals/buy',
+  productsMine: '/api/products/mine',
+  productSell: '/api/products/sell',
+
+  animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`,
+  animalSell: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell`,
+  animalSellQuote: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell-quote`,
+  productsByFarm: (farmId) => `/api/products/view?farmId=${encodeURIComponent(farmId)}`,
+  productSellQuote: (type, qty) => `/api/products/sell-quote?type=${encodeURIComponent(type)}&quantity=${encodeURIComponent(qty)}`
+};
+
+const $ = s => document.querySelector(s);
+
+const speciesMap = {
+  1: 'Cow',
+  2: 'Chicken',
+  3: 'Sheep',
+};
+const SPECIES_PRICES = {
+  Cow: 500,
+  Chicken: 50,
+  Sheep: 200
+};
+
+// this is necessary for html to not break
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// holds users data and selection
+const farmsState = { list: [], selectedId: null };
+const animalsState = { counts: [], selectedKind: null };
+const productsState = { counts: [], selectedName: null };
+
+// convert data into valid number
+function toNumberOrNull(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const numberValue = Number(value);
+
+  if (Number.isFinite(numberValue)) {
+    return numberValue;
+  }
+  return null;
+}
+
+
+// lets showing balance on main page
+function setBalanceChip(val) {
+  const element = document.getElementById('who-balance');
+
+  if (!element) {
+    return;
+  }
+
+  if (val === null || val === undefined) {
+    element.textContent = '—';
+    return;
+  }
+
+  const formatter = new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2
+  });
+  const formatted = formatter.format(val);
+  element.textContent = formatted;
+}
+
+
+// jwt token functions / reading, refreshing and saving tokens
+function getToken() { 
+  return sessionStorage.getItem('authToken'); 
+}
+
+function decodeJwt(token) {
+  try {
+    const payload = token.split('.')[1];
+    const json = atob(payload.replace(/-/g,'+').replace(/_/g,'/'));
+    return JSON.parse(json);
+  } catch { return null; }
+}
+
+function tokenExpired(payload) {
+  if (!payload || !payload.exp) return false;
+  return (Date.now() / 1000) >= payload.exp;
+}
+
+function extractToken(x) {
+  if (!x) return null;
+  if (typeof x === 'string') return x.split('.').length === 3 ? x : null;
+  if (typeof x === 'object') return x.jwt ?? null;
+  return null;
+}
+
+function secondsUntilExpiry(p) {
+  return p?.exp ? (p.exp - Math.floor(Date.now()/1000)) : Number.POSITIVE_INFINITY;
+}
+
+function getRefreshToken() { 
+  return sessionStorage.getItem('refreshToken'); 
+}
+
+function saveRefreshToken(rt) { 
+  if (rt) {
+    sessionStorage.setItem('refreshToken', rt); 
+  }
+}
+
+const REFRESH_SKEW = 60;
+let refreshTimer = null;
+let refreshingPromise = null;
+
+function saveToken(token) {
+  sessionStorage.setItem('authToken', token);
+  reflectUserFromToken(token);
+  scheduleRefresh();
+}
+
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  const p = decodeJwt(getToken());
+  const sec = p?.exp ? (p.exp - Math.floor(Date.now()/1000)) - REFRESH_SKEW : Infinity;
+  if (isFinite(sec) && sec > 0) {
+    refreshTimer = setTimeout(() => { ensureFreshToken().catch(()=>{}); }, sec * 1000);
+  }
+}
+
+// auto refresh system
+async function doRefresh() {
+  const rt = getRefreshToken();
+  if (!rt) return null;
+
+  const res = await fetch(cfg.refresh, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ refreshToken: rt })
+  });
+
+  const text = await res.text();
+  let data = null; 
+  try { 
+    data = text ? JSON.parse(text) : null; 
+  } catch { 
+    data = text; 
+  }
+  if (!res.ok) return null;
+
+  const newJwt = data?.jwt ?? null;
+  const newRt  = data?.refreshToken ?? null;
+
+  if (newJwt) saveToken(newJwt);
+  if (newRt)  saveRefreshToken(newRt);
+
+  return newJwt;
+}
+
+async function ensureFreshToken() {
+  if (refreshingPromise) return refreshingPromise;
+  refreshingPromise = (async () => {
+    const t = getToken();
+    if (!t) return false;
+    const p = decodeJwt(t);
+    const secondsLeft = p?.exp ? (p.exp - Math.floor(Date.now()/1000)) : Infinity;
+    if (secondsLeft > REFRESH_SKEW) return true;
+    const newToken = await doRefresh();
+    if (!newToken) return false;
+    saveToken(newToken);
+    return true;
+  })();
+  try { return await refreshingPromise; }
+  finally { refreshingPromise = null; }
+}
+
+// showing roles and authentication on the page
+function normalizeRolesFromJwt(p) {
+  const keys = ['roles', 'role', 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role']; // gets roles from jwt
+  const out = [];
+  for (const k of keys) {
+    const v = p?.[k];
+    if (Array.isArray(v)) out.push(...v);
+    else if (typeof v === 'string') out.push(v);
+  }
+  return Array.from(new Set(out));
+}
+
+function setRolesChip(roles) {
+  const element = document.getElementById('who-roles');
+  if (!element) {
+    return;
+  }
+
+  let list = [];
+  if (Array.isArray(roles)) {
+    list = roles;
+  } else if (typeof roles === 'string') {
+    list = [roles];
+  }
+
+  if (list.length > 0) {
+    element.textContent = list.join(', ');
+  } else {
+    element.textContent = '—';
+  }
+}
+
+function setAuthStatus(state) {
+  const element = document.getElementById('auth-status');
+  if (!element) {
+    return;
+  }
+
+  element.dataset.state = state;
+
+  let label = 'Unauthorized';
+  if (state === 'ok') {
+    label = 'Authorized';
+  } else if (state === 'checking') {
+    label = 'Checking…';
+  }
+
+  element.textContent = label;
+}
+
+
+// run for getting user session data and authorization info
+async function runWhoAmIOnce() {
+  setAuthStatus('checking');
+  try {
+    const response = await api(cfg.whoami);
+
+    let isOk = false;
+    if (response && typeof response.body === 'object' && response.body !== null) {
+      if ('isAuthenticated' in response.body) {
+        isOk = Boolean(response.body.isAuthenticated);
+      } else {
+        isOk = response.status === 200;
+      }
+    } else {
+      isOk = response?.status === 200;
+    }
+
+    setAuthStatus(isOk ? 'ok' : 'bad');
+
+    showJson(response?.body);
+
+    const body = response?.body || {};
+    if (Array.isArray(body.roles)) {
+      setRolesChip(body.roles);
+    } else if (Array.isArray(body.claims)) {
+      const ROLE_URI = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
+      const roles =
+        body.claims
+          .filter(c => c && (c.Type === 'role' || c.Type === ROLE_URI))
+          .map(c => c.Value);
+      setRolesChip(roles);
+    } else {
+      setRolesChip([]);
+    }
+
+    let balanceValue = null;
+
+    const balanceCandidates = [
+      body.balance,
+      body.accountBalance,
+      body.Balance,
+      body.AccountBalance,
+      body.credits,
+      body.Credits,
+      body.wallet && body.wallet.balance,
+      body.Wallet && body.Wallet.Balance,
+      body.profile && body.profile.balance,
+      body.user && body.user.balance
+    ];
+
+    for (let i = 0; i < balanceCandidates.length; i += 1) {
+      const candidate = balanceCandidates[i];
+      const numeric = toNumberOrNull(candidate);
+      if (numeric !== null) {
+        balanceValue = numeric;
+        break;
+      }
+    }
+
+    setBalanceChip(balanceValue);
+  } catch (err) {
+    setAuthStatus('bad');
+    showJson(err);
+  }
+}
+
+
+// api wrapper
+async function api(path, options = {}) {
+  const method  = options.method  ?? 'GET';
+  let   body    = options.body    ?? null;
+  const headers = options.headers ?? {};
+
+  const h = { 'Accept': 'application/json', ...headers };
+
+  if (body !== null && typeof body !== 'string') {
+    h['Content-Type'] = 'application/json';
+    body = JSON.stringify(body);
+  }
+
+  const token = getToken();
+  if (token) {
+    h['Authorization'] = `Bearer ${token}`;
+  }
+
+  let res  = await fetch(path, { method, headers: h, body });
+  let text = await res.text();
+
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; }
+  catch { data = text; }
+
+  if (res.status === 401) {
+    const refreshed = await ensureFreshToken();
+    if (refreshed) {
+      const token2 = getToken();
+      if (token2) h['Authorization'] = `Bearer ${token2}`;
+
+      res  = await fetch(path, { method, headers: h, body });
+      text = await res.text();
+      try { data = text ? JSON.parse(text) : null; }
+      catch { data = text; }
+    }
+  }
+
+  if (res.status === 401) {
+    sessionStorage.removeItem('authToken');
+    location.href = `signin.html?next=${encodeURIComponent(location.pathname)}`;
+    return;
+  }
+
+  if (!res.ok) {
+    throw { status: res.status, statusText: res.statusText, body: data };
+  }
+
+  return { status: res.status, headers: res.headers, body: data };
+}
+
+
+// --- debug stubs (UI removed) ---
+function showJson(x) {
+  try {
+    const pretty = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
+    console.debug('[debug]', pretty);
+  } catch { console.debug('[debug]', x); }
+}
+
+function renderTable(arr) {
+  if (Array.isArray(arr) && arr.length && typeof arr[0] === 'object') {
+    try { console.table(arr); } catch { console.log(arr); }
+  } else {
+    showJson(arr);
+  }
+}
+
+
+// --- Animals helpers ---
+function kindFromAnimal(a) {
+  let v = a?.kind 
+       ?? a?.Kind 
+       ?? a?.species 
+       ?? a?.Species 
+       ?? a?.type 
+       ?? a?.Type;
+
+  if (v === null || v === undefined) {
+    return 'Unknown';
+  }
+
+  let n;
+  if (typeof v === 'number') {
+    n = v;
+  } else if (/^\d+$/.test(String(v))) {
+    n = Number(v);
+  } else {
+    n = NaN;
+  }
+
+  if (!Number.isNaN(n) && speciesMap[n]) {
+    return speciesMap[n];
+  }
+
+  return String(v);
+}
+
+function countByKind(arr) {
+  const map = new Map();
+
+  const list = Array.isArray(arr) ? arr : [];
+  for (const a of list) {
+    const k = String(kindFromAnimal(a));
+    const current = map.get(k) ?? 0;
+    map.set(k, current + 1);
+  }
+
+  const result = [];
+  for (const [kind, count] of map) {
+    result.push({ kind, count });
+  }
+
+  return result;
+}
+
+function renderAnimals() {
+  const host = document.getElementById('animals-list');
+  if (!host) {
+    return;
+  }
+
+  const list = Array.isArray(animalsState.counts) ? animalsState.counts : [];
+  if (list.length === 0) {
+    host.innerHTML = '<span class="chip">No animals found.</span>';
+    return;
+  }
+
+  // build one button per animal species so user can select
+  let html = '';
+  for (const item of list) {
+    const isSelected = String(animalsState.selectedKind ?? '') === String(item.kind ?? '');
+    const aria = isSelected ? 'true' : 'false';
+    const selectedAttr = isSelected ? 'data-selected="true"' : '';
+
+    html +=
+      '<button class="btn" ' +
+        'data-animal-kind="' + esc(item.kind) + '" ' +
+        selectedAttr + ' ' +
+        'aria-pressed="' + aria + '" ' +
+        'title="' + (isSelected ? 'Selected – click to deselect' : 'Click to select') + '">' +
+        esc(item.kind) + ' × ' + esc(item.count) +
+      '</button>';
+  }
+
+  host.innerHTML = html;
+}
+
+async function loadAnimals() {
+  const host = document.getElementById('animals-list');
+  if (host) {
+    host.innerHTML = '<span class="chip">Loading…</span>';
+  }
+
+  try {
+    let counts = [];
+
+    if (farmsState.selectedId) {
+      const res = await api(cfg.animalsByFarm(farmsState.selectedId));
+      const list = Array.isArray(res && res.body) ? res.body : [];
+      counts = countByKind(list);
+    } else {
+      const res = await api(cfg.animalsMine);
+      counts = Array.isArray(res && res.body) ? res.body : [];
+    }
+
+    animalsState.counts = counts;
+    renderAnimals();
+  } catch (err) {
+    if (host) {
+      host.innerHTML = '<span class="chip">Failed to load.</span>';
+    }
+    showJson(err);
+  }
+}
+
+
+// product helpers
+const PRODUCT_NAME_MAP = {
+  1: 'Milk',
+  2: 'Eggs',
+  3: 'Wool'
+};
+
+function nameFromProduct(p) {
+  let value = null;
+
+  if (p) {
+    if ('name' in p)       value = p.name;
+    else if ('Name' in p)  value = p.Name;
+    else if ('type' in p)  value = p.type;
+    else if ('Type' in p)  value = p.Type;
+    else if ('kind' in p)  value = p.kind;
+    else if ('Kind' in p)  value = p.Kind;
+  }
+
+  if (value === null || value === undefined) {
+    return 'Unknown';
+  }
+
+  let num;
+  if (typeof value === 'number') {
+    num = value;
+  } else if (/^\d+$/.test(String(value))) {
+    num = Number(value);
+  } else {
+    num = NaN;
+  }
+
+  if (!Number.isNaN(num) && PRODUCT_NAME_MAP[num]) {
+    return PRODUCT_NAME_MAP[num];
+  }
+
+  return String(value);
+}
+
+function countByProductName(arr) {
+  const map = new Map();
+
+  const list = Array.isArray(arr) ? arr : [];
+  for (const product of list) {
+    const key = String(nameFromProduct(product));
+    const current = map.get(key) ?? 0;
+    const next = current + 1;
+    map.set(key, next);
+  }
+
+  const result = [];
+  for (const [name, count] of map) {
+    result.push({ name, count });
+  }
+
+  return result;
+}
+
+function renderProducts() {
+  const host = document.getElementById('products-list');
+  if (!host) {
+    return;
+  }
+
+  const list = Array.isArray(productsState.counts) ? productsState.counts : [];
+  if (list.length === 0) {
+    host.innerHTML = '<span class="chip">No products found.</span>';
+    return;
+  }
+
+  let html = '';
+  for (const item of list) {
+    const isSelected = String(productsState.selectedName ?? '') === String(item.name ?? '');
+    const aria = isSelected ? 'true' : 'false';
+    const selectedAttr = isSelected ? 'data-selected="true"' : '';
+
+    html +=
+      '<button class="btn" ' +
+        'data-product-name="' + esc(item.name) + '" ' +
+        selectedAttr + ' ' +
+        'aria-pressed="' + aria + '" ' +
+        'title="' + (isSelected ? 'Selected – click to deselect' : 'Click to select') + '">' +
+        esc(item.name) + ' × ' + esc(item.count) +
+      '</button>';
+  }
+
+  host.innerHTML = html;
+}
+
+async function loadProducts() {
+  const host = document.getElementById('products-list');
+  if (host) {
+    host.innerHTML = '<span class="chip">Loading…</span>';
+  }
+
+  try {
+    let counts = [];
+
+    if (farmsState.selectedId) {
+      const res = await api(cfg.productsByFarm(farmsState.selectedId));
+      const list = Array.isArray(res && res.body) ? res.body : [];
+      counts = countByProductName(list);
+    } else {
+      const res = await api(cfg.productsMine);
+      counts = Array.isArray(res && res.body) ? res.body : [];
+    }
+
+    productsState.counts = counts;
+    renderProducts();
+  } catch (err) {
+    if (host) {
+      host.innerHTML = '<span class="chip">Failed to load.</span>';
+    }
+    showJson(err);
+  }
+}
+
+function renderFarms() {
+  const host = document.getElementById('farms-list');
+  if (!host) {
+    return;
+  }
+
+  const farms = Array.isArray(farmsState.list) ? farmsState.list : [];
+  if (farms.length === 0) {
+    host.innerHTML = '<span class="chip">No farms found.</span>';
+    return;
+  }
+
+  let html = '';
+  for (const f of farms) {
+    const id =
+      (f && (f.id ?? f.Id ?? f.farmId ?? f.FarmId)) ?? '';
+    const name =
+      (f && (f.name ?? f.Name)) ?? ('Farm #' + (id || '—'));
+
+    const isSelected =
+      String(farmsState.selectedId ?? '') === String(id ?? '');
+
+    const aria = isSelected ? 'true' : 'false';
+    const selectedAttr = isSelected ? 'data-selected="true"' : '';
+    const check = isSelected ? '✓ ' : '';
+
+    html +=
+      '<button class="btn" ' +
+        'data-farmid="' + esc(id) + '" ' +
+        selectedAttr + ' ' +
+        'aria-pressed="' + aria + '" ' +
+        'title="' + (isSelected ? 'Selected – click to deselect' : 'Click to select') + '">' +
+        check + esc(name) +
+      '</button>';
+  }
+  host.innerHTML = html;
+}
+
+
+async function loadMyFarms() {
+  const host = document.getElementById('farms-list');
+  if (host) {
+    host.innerHTML = '<span class="chip">Loading…</span>';
+  }
+  try {
+    const res = await api(cfg.farmsMine);
+    const list = Array.isArray(res && res.body) ? res.body : [];
+    farmsState.list = list;
+
+    const stillExists = farmsState.list.some(f =>
+      String(f?.id ?? f?.Id) === String(farmsState.selectedId)
+    );
+    if (!stillExists) {
+      farmsState.selectedId = null;
+    }
+
+    renderFarms();
+  } catch (err) {
+    if (host) {
+      host.innerHTML = '<span class="chip">Failed to load.</span>';
+    }
+    showJson(err);
+  }
+}
+
+// updates info on header from jwt token
+function reflectUserFromToken(token) {
+  const payload = decodeJwt(token);
+
+  let name = '—';
+  if (payload) {
+    if (payload.name) {
+      name = payload.name;
+    } else if (payload.unique_name) {
+      name = payload.unique_name;
+    } else if (payload.sub) {
+      name = payload.sub;
+    }
+  }
+  document.getElementById('who-name').textContent = name;
+  const roles = normalizeRolesFromJwt(payload);
+  setRolesChip(roles);
+  //  $('#who-exp').textContent = 'exp: ' + (p?.exp ? new Date(p.exp * 1000).toLocaleString() : 'n/a');
+}
+
+
+// boot
+async function boot() {
+  const token = getToken();
+  if (!token) {
+    location.href = 'signin.html?next=' + encodeURIComponent(location.pathname);
+    return;
+  }
+
+  const payload = decodeJwt(token);
+  if (tokenExpired(payload)) {
+    sessionStorage.removeItem('authToken');
+    location.href = 'signin.html?next=' + encodeURIComponent(location.pathname);
+    return;
+  }
+
+  reflectUserFromToken(token);
+
+  try {
+    const res = await api(cfg.whoami);
+    if (res && res.body) {
+      const currentName = document.getElementById('who-name').textContent;
+      document.getElementById('who-name').textContent = res.body.name || currentName;
+      showJson(res.body);
+    }
+
+    await loadMyFarms();
+    await loadAnimals();
+    await loadProducts();
+  } catch (err) {
+    showJson(err);
+  }
+}
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  $('#logout-btn').addEventListener('click', () => {
+    sessionStorage.removeItem('authToken');
+    location.href = 'signin.html';
+  });
+
+  const whoBtn = document.getElementById('btn-whoami');
+  if (whoBtn) {
+    whoBtn.addEventListener('click', async () => {
+      try {
+        const r = await api(cfg.whoami);
+        showJson(r.body);
+      } catch (e) {
+        showJson(e);
+      }
+    });
+  }
+
+  const farmsBtn = document.getElementById('btn-farms');
+  if (farmsBtn) {
+    farmsBtn.addEventListener('click', async () => {
+      try {
+        const r = await api(cfg.farms);
+        renderTable(r.body);
+      } catch (e) {
+        showJson(e);
+      }
+    });
+  }
+
+  // refresh farms on demand
+  const refreshBtn = document.getElementById('btn-refresh-farms');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', loadMyFarms);
+  }
+
+  // create farm flow
+  const createBtn = document.getElementById('btn-create-farm');
+  if (createBtn) {
+    createBtn.addEventListener('click', async () => {
+      const nameInput = prompt('New farm name:') || '';
+      const name = nameInput.trim();
+      if (!name) {
+        return;
+      }
+
+      createBtn.disabled = true;
+
+      try {
+        const r = await api(cfg.farms, {
+          method: 'POST',
+          body: { farmName: name }
+        });
+
+        const created = r?.body || {};
+        const newId =
+          created.id ??
+          created.Id ??
+          created.farmId ??
+          created.FarmId ??
+          null;
+
+        farmsState.selectedId = newId;
+        await loadMyFarms();
+      } catch (e) {
+        showJson(e);
+        alert('Failed to create farm.');
+      } finally {
+        createBtn.disabled = false;
+      }
+    });
+  }
+
+  // delete selected farm flow
+  const deleteBtn = document.getElementById('btn-delete-farm');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      const id = farmsState.selectedId;
+      if (!id) {
+        alert('Select a farm to delete.');
+        return;
+      }
+
+      const name =
+        (farmsState.list.find(f => String(f.id ?? f.Id) === String(id))?.name) ??
+        `#${id}`;
+
+      const confirmed = confirm(
+        `Are you sure you want to delete farm "${name}"? This cannot be undone.`
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      deleteBtn.disabled = true;
+
+      try {
+        await api(`${cfg.farms}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        // clear selection and refresh list
+        farmsState.selectedId = null;
+        await loadMyFarms();
+      } catch (e) {
+        showJson(e);
+        alert('Failed to delete farm.');
+      } finally {
+        deleteBtn.disabled = false;
+      }
+    });
+  }
+
+  // toggle select
+  const farmsList = document.getElementById('farms-list');
+  if (farmsList) {
+    farmsList.addEventListener('click', (e) => {
+      let node = e.target;
+      if (!(node instanceof Element)) {
+        node = node.parentElement;
+      }
+      if (!node) {
+        return;
+      }
+
+      const btn = node.closest('button[data-farmid]');
+      if (!btn) {
+        return;
+      }
+
+      const id = btn.getAttribute('data-farmid');
+      const isSame = String(farmsState.selectedId) === String(id);
+      farmsState.selectedId = isSame ? null : id;
+
+      renderFarms();
+      loadAnimals();
+      loadProducts();
+    });
+  }
+
+  // refresh products manually
+  const refreshProductsBtn = document.getElementById('btn-refresh-products');
+  if (refreshProductsBtn) {
+    refreshProductsBtn.addEventListener('click', loadProducts);
+  }
+
+  const refreshAnimalsBtn = document.getElementById('btn-refresh-animals');
+  if (refreshAnimalsBtn) {
+    refreshAnimalsBtn.addEventListener('click', loadAnimals);
+  }
+
+  function updateBuyPriceChip() {
+    const sel = document.getElementById('buy-species');
+    const chip = document.getElementById('buy-price-chip');
+    if (!sel || !chip) {
+      return;
+    }
+
+    const price = SPECIES_PRICES[sel.value];
+    chip.textContent = 'Price: ' + (price != null ? String(price) : '—');
+  }
+
+  function showBuyPanel() {
+    const panel = document.getElementById('buy-panel');
+    if (!panel) {
+      return;
+    }
+
+    panel.hidden = false;
+    updateBuyPriceChip();
+
+    const speciesEl = document.getElementById('buy-species');
+    if (speciesEl) {
+      speciesEl.focus();
+    }
+  }
+
+  function hideBuyPanel() {
+    const panel = document.getElementById('buy-panel');
+    if (panel) {
+      panel.hidden = true;
+    }
+  }
+
+  const buyBtn = document.getElementById('btn-buy-animal');
+  if (buyBtn) {
+    buyBtn.addEventListener('click', () => {
+      if (!farmsState.selectedId) {
+        alert('Select a farm first.');
+        return;
+      }
+      showBuyPanel();
+    });
+  }
+
+  const buySpecies = document.getElementById('buy-species');
+  if (buySpecies) {
+    buySpecies.addEventListener('change', updateBuyPriceChip);
+  }
+
+  const buyCancel = document.getElementById('buy-cancel');
+  if (buyCancel) {
+    buyCancel.addEventListener('click', hideBuyPanel);
+  }
+
+  const buyConfirm = document.getElementById('buy-confirm');
+  if (buyConfirm) {
+    buyConfirm.addEventListener('click', async () => {
+      const farmId = farmsState.selectedId;
+      if (!farmId) {
+        alert('Select a farm first.');
+        hideBuyPanel();
+        return;
+      }
+
+      const species = document.getElementById('buy-species')?.value || 'Sheep';
+      const price = SPECIES_PRICES[species];
+
+      const confirmed = confirm(`Do you want to buy a ${species} for ${price}?`);
+      if (!confirmed) {
+        return;
+      }
+
+      const btn = document.getElementById('buy-confirm');
+      if (btn) {
+        btn.disabled = true;
+      }
+
+      try {
+        await api(`${cfg.animalsBuy}?farmId=${encodeURIComponent(farmId)}`, {
+          method: 'POST',
+          body: { species }
+        });
+
+        hideBuyPanel();
+        await loadAnimals();
+
+        try {
+          const r = await api(cfg.whoami);
+          setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
+        } catch {}
+      } catch (e) {
+        showJson(e);
+        alert('Failed to buy animal.');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+        }
+      }
+    });
+  }
+
+  async function pickOldestAnimalId(farmId, kind) {
+    const r = await api(cfg.animalsByFarm(farmId));
+    const animals = Array.isArray(r?.body) ? r.body : [];
+
+    const matches = animals.filter(a => {
+      const species = a?.species ?? a?.Species ?? a?.kind ?? a?.Kind;
+      return String(species) === String(kind);
+    });
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    // to sell the oldest animal
+    matches.sort((a, b) => {
+      const ra = (a?.remainingLifeDays ?? a?.RemainingLifeDays ?? Infinity);
+      const rb = (b?.remainingLifeDays ?? b?.RemainingLifeDays ?? Infinity);
+
+      if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) {
+        return ra - rb;
+      }
+
+      const pa = new Date(a?.purchasedAt ?? a?.PurchasedAt ?? 0).getTime();
+      const pb = new Date(b?.purchasedAt ?? b?.PurchasedAt ?? 0).getTime();
+      return pa - pb;
+    });
+
+    const id = matches[0]?.id ?? matches[0]?.Id ?? null;
+    return id;
+  }
+
+  const animalsList = document.getElementById('animals-list');
+  if (animalsList) {
+    animalsList.addEventListener('click', (e) => {
+      let node = e.target;
+      if (!(node instanceof Element)) {
+        node = node?.parentElement;
+      }
+
+      const btn = node?.closest('button[data-animal-kind]');
+      if (!btn) {
+        return;
+      }
+
+      const kind = btn.getAttribute('data-animal-kind');
+      const same = String(animalsState.selectedKind) === String(kind);
+      animalsState.selectedKind = same ? null : kind;
+
+      renderAnimals();
+    });
+  }
+
+  const sellBtn = document.getElementById('btn-sell-animal');
+  if (sellBtn) {
+    sellBtn.addEventListener('click', async () => {
+      const farmId = farmsState.selectedId;
+      if (!farmId) {
+        alert('Select a farm first.');
+        return;
+      }
+
+      const kind = animalsState.selectedKind;
+      if (!kind) {
+        alert('Select an animal kind in the list.');
+        return;
+      }
+
+      sellBtn.disabled = true;
+
+      try {
+        const animalId = await pickOldestAnimalId(farmId, kind);
+        if (!animalId) {
+          alert(`No ${kind} found in this farm.`);
+          return;
+        }
+
+        let price = null;
+        try {
+          const qr = await api(cfg.animalSellQuote(animalId));
+          price = qr?.body?.price ?? qr?.body?.Price ?? null;
+        } catch { }
+
+        const message =
+          (price != null)
+            ? `Do you want to sell a ${kind} for ${price}?`
+            : `Do you want to sell a ${kind}?`;
+
+        const confirmed = confirm(message);
+        if (!confirmed) {
+          return;
+        }
+
+        const sr = await api(cfg.animalSell(animalId), { method: 'POST' });
+
+        await loadAnimals();
+        try {
+          const r = await api(cfg.whoami);
+          setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
+        } catch {}
+      } catch (e) {
+        showJson(e);
+        alert('Failed to sell animal.');
+      } finally {
+        sellBtn.disabled = false;
+      }
+    });
+  }
+
+  const productsList = document.getElementById('products-list');
+  if (productsList) {
+    productsList.addEventListener('click', (e) => {
+      let node = e.target;
+      if (!(node instanceof Element)) {
+        node = node?.parentElement;
+      }
+
+      const btn = node?.closest('button[data-product-name]');
+      if (!btn) {
+        return;
+      }
+
+      const name = btn.getAttribute('data-product-name');
+      const same = String(productsState.selectedName) === String(name);
+      productsState.selectedName = same ? null : name;
+
+      renderProducts();
+    });
+  }
+
+  const sellProdBtn = document.getElementById('btn-sell-product');
+  if (sellProdBtn) {
+    sellProdBtn.addEventListener('click', async () => {
+      const kind = productsState.selectedName;
+      if (!kind) {
+        alert('Select a product kind first.');
+        return;
+      }
+
+      const entry = (productsState.counts || []).find(x => String(x.name) === String(kind));
+      const max = entry?.count ?? 0;
+      if (max <= 0) {
+        alert(`You have no ${kind} to sell.`);
+        return;
+      }
+
+      let qtyStr = prompt(`How many ${kind} do you want to sell? (max ${max})`);
+      if (qtyStr == null) {
+        return;
+      }
+
+      let qty = Number.parseInt(qtyStr, 10);
+      if (!Number.isFinite(qty) || qty < 1) {
+        alert('Enter a valid positive number.');
+        return;
+      }
+      if (qty > max) {
+        alert(`You can sell at most ${max}.`);
+        qty = max;
+      }
+
+      sellProdBtn.disabled = true;
+
+      try {
+        let price = null;
+        try {
+          const qr = await api(cfg.productSellQuote(kind, qty));
+          price = qr?.body?.price ?? qr?.body?.Price ?? null;
+        } catch { }
+
+        const msg =
+          (price != null)
+            ? `Are you sure you want to sell ${qty} ${kind} for ${price}?`
+            : `Are you sure you want to sell ${qty} ${kind}?`;
+
+        const confirmed = confirm(msg);
+        if (!confirmed) {
+          return;
+        }
+
+        const r = await api(cfg.productSell, {
+          method: 'POST',
+          body: { type: kind, quantity: qty }
+        });
+
+        // refresh products & balance
+        await loadProducts();
+        try {
+          const wr = await api(cfg.whoami);
+          setBalanceChip(toNumberOrNull(wr?.body?.balance ?? wr?.body?.Balance ?? null));
+        } catch {}
+      } catch (e) {
+        showJson(e);
+        alert('Failed to sell product.');
+      } finally {
+        sellProdBtn.disabled = false;
+      }
+    });
+  }
+
+  boot();
+  runWhoAmIOnce();
+  scheduleRefresh();
+});

@@ -33,12 +33,12 @@ public class FarmsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<Farm?>> Get(int id) => await _farms.GetFarmAsync(id);
 
-//    [HttpPost("{id:int}/tick")]
-//    public async Task<ActionResult<object>> Tick(int id)
-//    {
-//        var created = await _production.TickAsync(id);
-//        return new { created };
-//    }
+    //    [HttpPost("{id:int}/tick")]
+    //    public async Task<ActionResult<object>> Tick(int id)
+    //    {
+    //        var created = await _production.TickAsync(id);
+    //        return new { created };
+    //    }
 
     [Authorize]
     [HttpGet("mine")]
@@ -47,6 +47,26 @@ public class FarmsController : ControllerBase
         var userId = User.UserId();
         var farms = await _farms.GetAllFarmsForUserAsync(userId);
         return Ok(farms);
+    }
+    
+    [Authorize]
+    [HttpDelete("{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var userId = User.UserId();
+        try
+        {
+            var deleted = await _farms.DeleteFarmAsync(userId, id);
+            if (!deleted) return NotFound(); // id not found or not owned
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid(); // not owner
+        }
     }
 }
 public record CreateFarmRequest(string farmName);

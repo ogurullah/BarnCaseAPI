@@ -31,6 +31,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddControllers().AddJsonOptions(o =>
 {
     o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles; // crashes without this
+    o.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
 });
 
 JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
@@ -78,17 +79,17 @@ builder.Services
                 Log.Warning(ctx.Exception, "JWT auth failed");
                 return Task.CompletedTask;
             },
-            OnMessageReceived = ctx =>
-            {
-                // Helps debug Swagger not sending the header you think it is
-                if (string.IsNullOrEmpty(ctx.Token))
-                    Log.Warning("No bearer token found on request to {Path}", ctx.Request.Path);
-                return Task.CompletedTask;
-            },
+//            OnMessageReceived = ctx =>
+//            {
+//                // Helps debug Swagger not sending the header you think it is
+//                if (string.IsNullOrEmpty(ctx.Token))
+//                    Log.Warning("No bearer token found on request to {Path}", ctx.Request.Path);
+//                return Task.CompletedTask;
+//            },
             OnTokenValidated = ctx =>
             {
                 var roles = ctx.Principal?.FindAll(ClaimTypes.Role).Select(r => r.Value).ToArray() ?? Array.Empty<string>();
-                Log.Information("JWT ok for sub={Sub}, roles=[{Roles}]",
+                Log.Debug("JWT ok for sub={Sub}, roles=[{Roles}]",
                     ctx.Principal?.FindFirstValue(ClaimTypes.NameIdentifier),
                     string.Join(",", roles));
                 return Task.CompletedTask;
@@ -173,18 +174,33 @@ app.UseSerilogRequestLogging(options =>
     options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} -> {StatusCode} in {Elapsed:0.0000} ms";
 });
 
-app.UseDeveloperExceptionPage();
-app.UseSwagger();
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "BarnCase API v1");
-    c.RoutePrefix = string.Empty;
-});
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
-// optional: app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "BarnCase API v1");
+        c.RoutePrefix = "swagger";
+    }); 
+}
+
+//app.MapGet("/__static_debug", (IWebHostEnvironment env) =>
+//{
+//    var web = env.WebRootPath ?? "(null)";
+//    var content = env.ContentRootPath ?? "(null)";
+//    var files = Directory.Exists(web) ? Directory.GetFiles(web).Select(Path.GetFileName) : Array.Empty<string>();
+//    return Results.Json(new { contentRoot = content, webRoot = web, files });
+//});
 
 app.MapControllers();
 

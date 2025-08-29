@@ -3,6 +3,7 @@ using BarnCaseAPI.Models;
 using Microsoft.AspNetCore.Mvc;
 using BarnCaseAPI.Security;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace BarnCaseAPI.Controllers;
 
@@ -35,6 +36,26 @@ public class AnimalsController : ControllerBase
     {
         var animals = await _animals.ViewAnimalsAsync(farmId);
         return Ok(animals);
+    }
+
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<object>>> GetMine()
+    {
+        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!int.TryParse(idStr, out var userId)) return Ok(Array.Empty<object>());
+
+        var dict = await _animals.GetAnimalCountsForUserAsync(userId);
+        return Ok(dict.Select(kv => new { kind = kv.Key, count = kv.Value }));
+    }
+
+    [Authorize]
+    [HttpGet("{animalId:int}/sell-quote")]
+    public async Task<ActionResult<object>> GetSellQuote([FromRoute] int animalId)
+    {
+        var userId = User.UserId();
+        var price = await _animals.GetSellQuoteAsync(userId, animalId);
+        if (price is null) return NotFound();
+        return Ok(new { price = price.Value });
     }
 
 }

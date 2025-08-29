@@ -50,4 +50,31 @@ public class FarmService
             .AsSplitQuery()
             .ToListAsync();
     }
+
+    public async Task<bool> DeleteFarmAsync(int userId, int farmId)
+    {
+        using var _ = _log.BeginScope(new { userId, farmId });
+        _log.LogInformation("Deleting farm with ID {farm} from user with ID {userId}.", farmId, userId);
+        var farm = await _Database.Farms
+            .AsQueryable()
+            .FirstOrDefaultAsync(f => f.Id == farmId);
+
+        if (farm is null)
+        {
+            _log.LogInformation("Farm with ID {farm} does not exist so it can not be deleted.", farmId);
+            return false;
+        }    
+        if (farm.OwnerId != userId)
+                throw new UnauthorizedAccessException();
+
+        // if you have related Animals/Products with FK constraints, either
+        // configure cascade delete in your model, or remove them explicitly:
+        // _Database.Animals.RemoveRange(_Database.Animals.Where(a => a.FarmId == farmId));
+        // _Database.Products.RemoveRange(_Database.Products.Where(p => p.FarmId == farmId));
+
+        _Database.Farms.Remove(farm);
+        await _Database.SaveChangesAsync();
+        return true;
+    }
+
 }
