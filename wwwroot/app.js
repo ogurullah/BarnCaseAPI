@@ -12,7 +12,9 @@ const cfg = {
   animalSell: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell`,
   animalSellQuote: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell-quote`,
   productsMine: '/api/products/mine',
-  productsByFarm: (farmId) => `/api/products/view?farmId=${encodeURIComponent(farmId)}`
+  productsByFarm: (farmId) => `/api/products/view?farmId=${encodeURIComponent(farmId)}`,
+  productSell: '/api/products/sell',
+  productSellQuote: (type, qty) => `/api/products/sell-quote?type=${encodeURIComponent(type)}&quantity=${encodeURIComponent(qty)}`
 };
 
 const $ = s => document.querySelector(s);
@@ -37,7 +39,7 @@ function esc(s) {
 // state for future filtering
 const farmsState = { list: [], selectedId: null };
 const animalsState = { counts: [], selectedKind: null };
-const productsState = { counts: [] };
+const productsState = { counts: [], selectedName: null };
 
 // balance helpers
 function toNumberOrNull(v) {
@@ -328,10 +330,19 @@ function renderProducts() {
     host.innerHTML = `<span class="chip">No products found.</span>`;
     return;
   }
-  host.innerHTML = list
-    .map(x => `<span class="chip">${esc(x.name)} × ${esc(x.count)}</span>`)
-    .join('');
+  host.innerHTML = list.map(x => {
+    const selected = String(productsState.selectedName ?? '') === String(x.name ?? '');
+    const pressed = selected ? 'true' : 'false';
+    return `<button class="btn"
+              data-product-name="${esc(x.name)}"
+              ${selected ? 'data-selected="true"' : ''}
+              aria-pressed="${pressed}"
+              title="${selected ? 'Selected – click to deselect' : 'Click to select'}">
+              ${esc(x.name)} × ${esc(x.count)}
+            </button>`;
+  }).join('');
 }
+
 async function loadProducts() {
   const host = document.getElementById('products-list');
   if (host) host.innerHTML = `<span class="chip">Loading…</span>`;
@@ -648,6 +659,72 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('Failed to sell animal.');
     } finally {
       sellBtn.disabled = false;
+    }
+  });
+
+  // Select/deselect product kind
+  const productsList = document.getElementById('products-list');
+  if (productsList) productsList.addEventListener('click', (e) => {
+    let node = e.target;
+    if (!(node instanceof Element)) node = node?.parentElement;
+    const btn = node?.closest('button[data-product-name]');
+    if (!btn) return;
+    const name = btn.getAttribute('data-product-name');
+    productsState.selectedName =
+      (String(productsState.selectedName) === String(name)) ? null : name;
+    renderProducts();
+  });
+
+  // SELL PRODUCT flow
+  const sellProdBtn = document.getElementById('btn-sell-product');
+  if (sellProdBtn) sellProdBtn.addEventListener('click', async () => {
+    const kind = productsState.selectedName;
+    if (!kind) { alert('Select a product kind first.'); return; }
+
+    // figure out how many of this product we have
+    const entry = (productsState.counts || []).find(x => String(x.name) === String(kind));
+    const max = entry?.count ?? 0;
+    if (max <= 0) { alert(`You have no ${kind} to sell.`); return; }
+
+    // ask for quantity (1..max)
+    let qtyStr = prompt(`How many ${kind} do you want to sell? (max ${max})`);
+    if (qtyStr == null) return; // cancelled
+    let qty = Number.parseInt(qtyStr, 10);
+    if (!Number.isFinite(qty) || qty < 1) { alert('Enter a valid positive number.'); return; }
+    if (qty > max) { alert(`You can sell at most ${max}.`); qty = max; }
+
+    sellProdBtn.disabled = true;
+    try {
+      // try to get a quote (optional)
+      let price = null;
+      try {
+        const qr = await api(cfg.productSellQuote(kind, qty));
+        price = qr?.body?.price ?? qr?.body?.Price ?? null;
+      } catch { /* quote endpoint might not exist yet */ }
+
+      const msg = (price != null)
+        ? `Are you sure you want to sell ${qty} ${kind} for ${price}?`
+        : `Are you sure you want to sell ${qty} ${kind}?`;
+      if (!confirm(msg)) return;
+      // perform the sell
+      const r = await api(cfg.productSell, {
+        method: 'POST',
+        body: { type: kind, quantity: qty } // backend expects enum name string + quantity
+      });
+      // if API returns { earned }, you could surface it:
+      // if (r?.body?.earned != null) alert(`Sold for ${r.body.earned}.`);
+
+      // refresh products & balance
+      await loadProducts();
+      try {
+        const wr = await api(cfg.whoami);
+        setBalanceChip(toNumberOrNull(wr?.body?.balance ?? wr?.body?.Balance ?? null));
+      } catch {}
+    } catch (e) {
+      showJson(e);
+      alert('Failed to sell product.');
+    } finally {
+      sellProdBtn.disabled = false;
     }
   });
 

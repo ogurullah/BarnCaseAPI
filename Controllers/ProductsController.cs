@@ -14,16 +14,33 @@ public class ProductsController : ControllerBase
     private readonly ProductService _productService;
     public ProductsController(ProductService productService) => _productService = productService;
 
-    public record SellRequest(int FarmId, int[] ProductIds);
+    public record SellRequest
+    {
+        public ProductType Type { get; set; }
+        public int Quantity { get; set; }
+    };
 
     [Authorize]
     [HttpPost("sell")]
     public async Task<ActionResult<object>> SellAsync([FromBody] SellRequest request)
     {
+        if (request.Quantity < 1) return BadRequest();
         var userId = User.UserId();
-        var total = await _productService.SellAsync(userId, request.FarmId, request.ProductIds);
+        var total = await _productService.SellAsync(userId, request.Type, request.Quantity);
         return new { total };
     }
+
+    // GET /api/products/sell-quote?type=Milk&quantity=10
+    [Authorize]
+    [HttpGet("sell-quote")]
+    public async Task<ActionResult<object>> GetSellQuote([FromQuery] ProductType type, [FromQuery] int quantity)
+    {
+        if (quantity < 1) return BadRequest();
+        var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var (ok, price) = await _productService.GetSellQuoteAsync(userId, type, quantity);
+        if (!ok) return BadRequest(new { error = "Insufficient quantity." });
+        return Ok(new { price });
+}
 
     [HttpGet("view")]
     public async Task<ActionResult<IEnumerable<Product>>> ViewProducts([FromQuery] int farmId)

@@ -16,43 +16,44 @@ public class ProductService
         _log = log;
     }
 
-    public async Task<decimal> SellAsync(int userId, int farmId, IEnumerable<int> productIds)
+    public async Task<decimal> SellAsync(int userId, ProductType type, int quantity)
     {
-        using var _ = _log.BeginScope(new { userId, farmId, productIds });
-        _log.LogInformation("Selling products for farm with ID {farmId} for user with ID {userId}. Products: {productIds}", farmId, userId, productIds);
-
-        var farm = await _Database.Farms.Include(f => f.Owner)
-            .FirstAsync(f => f.Id == farmId && f.OwnerId == userId);
-
         var items = await _Database.Products
-            .Where(p => p.FarmId == farmId && productIds.Contains(p.Id) && !p.isSold)
+            .Where(p => p.Farm.OwnerId == userId && p.Type == type)
+            .OrderBy(p => p.Id)
+            .Take(quantity)
             .ToListAsync();
 
-        if (items.Count == 0) return 0m;
-        decimal total = 0m;
+        if (items.Count < quantity)
+            throw new InvalidOperationException("Insufficient quantity.");
 
-        foreach (var product in items)
-        {
-            var TotalPrice = product.Quantity * product.UnitPrice;
-            product.isSold = true;
-            product.SoldAt = DateTime.UtcNow;
-            product.SoldTotal = TotalPrice;
-            total += TotalPrice;
-        }
-        _log.LogInformation("Total profit is {Total} from selling products {productIds} for farm with ID {farmId}.", total, productIds, farmId);
+        var (ok, price) = await GetSellQuoteAsync(userId, type, quantity);
+        if (!ok) throw new InvalidOperationException("Insufficient quantity.");
 
-        farm.Owner.Balance += total;
-
-        _Database.Ledger.Add(new Ledger
-        {
-            UserId = farm.OwnerId,
-            Type = LedgerType.SellProduct,
-            Amount = total,
-            Reference = $"Sold {items.Count} products from farm {farm.Name}"
-        });
+        _Database.Products.RemoveRange(items);
+        var user = await _Database.Users.FindAsync(userId);
+        if (user != null) user.Balance += price;
 
         await _Database.SaveChangesAsync();
-        return Math.Round(total, 2);
+        return price;
+    }
+
+    public async Task<(bool ok, decimal price)> GetSellQuoteAsync(int userId, ProductType type, int quantity)
+    {
+        var available = await _Database.Products
+            .Where(p => p.Farm.OwnerId == userId && p.Type == type)
+            .CountAsync();
+
+        if (available < quantity) return (false, 0m);
+
+        decimal unitPrice = type switch
+        {
+            ProductType.Milk => 2.5m,
+            ProductType.Eggs => 0.4m,
+            ProductType.Wool => 5m,
+            _ => 1m
+        };
+        return (true, unitPrice * quantity);
     }
 
     public async Task<IReadOnlyList<Product>> GetProductsByFarmAsync(int farmId)
