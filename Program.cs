@@ -79,17 +79,17 @@ builder.Services
                 Log.Warning(ctx.Exception, "JWT auth failed");
                 return Task.CompletedTask;
             },
-            OnMessageReceived = ctx =>
-            {
-                // Helps debug Swagger not sending the header you think it is
-                if (string.IsNullOrEmpty(ctx.Token))
-                    Log.Warning("No bearer token found on request to {Path}", ctx.Request.Path);
-                return Task.CompletedTask;
-            },
+//            OnMessageReceived = ctx =>
+//            {
+//                // Helps debug Swagger not sending the header you think it is
+//                if (string.IsNullOrEmpty(ctx.Token))
+//                    Log.Warning("No bearer token found on request to {Path}", ctx.Request.Path);
+//                return Task.CompletedTask;
+//            },
             OnTokenValidated = ctx =>
             {
                 var roles = ctx.Principal?.FindAll(ClaimTypes.Role).Select(r => r.Value).ToArray() ?? Array.Empty<string>();
-                Log.Information("JWT ok for sub={Sub}, roles=[{Roles}]",
+                Log.Debug("JWT ok for sub={Sub}, roles=[{Roles}]",
                     ctx.Principal?.FindFirstValue(ClaimTypes.NameIdentifier),
                     string.Join(",", roles));
                 return Task.CompletedTask;
@@ -181,7 +181,7 @@ app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
-// optional: app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 
 if (app.Environment.IsDevelopment())
 {
@@ -194,13 +194,13 @@ if (app.Environment.IsDevelopment())
     }); 
 }
 
-app.MapGet("/__static_debug", (IWebHostEnvironment env) =>
-{
-    var web = env.WebRootPath ?? "(null)";
-    var content = env.ContentRootPath ?? "(null)";
-    var files = Directory.Exists(web) ? Directory.GetFiles(web).Select(Path.GetFileName) : Array.Empty<string>();
-    return Results.Json(new { contentRoot = content, webRoot = web, files });
-});
+//app.MapGet("/__static_debug", (IWebHostEnvironment env) =>
+//{
+//    var web = env.WebRootPath ?? "(null)";
+//    var content = env.ContentRootPath ?? "(null)";
+//    var files = Directory.Exists(web) ? Directory.GetFiles(web).Select(Path.GetFileName) : Array.Empty<string>();
+//    return Results.Json(new { contentRoot = content, webRoot = web, files });
+//});
 
 app.MapControllers();
 

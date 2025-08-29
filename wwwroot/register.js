@@ -1,60 +1,101 @@
 'use strict';
 
 const $ = (s) => document.querySelector(s);
+
 function msg(text, isError = false) {
-  const el = $('#msg');
+  const el = document.getElementById('msg');
+  if (!el) {
+    return;
+  }
+
   el.textContent = text;
   el.style.color = isError ? 'crimson' : 'inherit';
 }
 
-// tolerant token extractor in case you later auto-login here
 function extractToken(obj) {
-  if (!obj || typeof obj !== 'object') return null;
-  return obj.jwt || obj.accessToken || obj.access_token || obj.token || null;
+  if (!obj || typeof obj !== 'object') {
+    return null;
+  }
+  // couldn't remember the exact token name
+  if (obj.jwt) return obj.jwt;
+  if (obj.accessToken) return obj.accessToken;
+  if (obj.access_token) return obj.access_token;
+  if (obj.token) return obj.token;
+  return null;
 }
 
-async function registerUser(creds) {
+async function registerUser(credentials) {
   const res = await fetch('/auth/register', {
     method: 'POST',
-    headers: { 'Accept':'application/json', 'Content-Type':'application/json' },
-    body: JSON.stringify(creds)
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(credentials)
   });
-  const text = await res.text();
-  let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+  const raw = await res.text();
+  let data = null;
+  try {
+    data = raw ? JSON.parse(raw) : null;
+  } catch {
+    data = raw;
+  }
 
   if (!res.ok) {
-    // surface API message (e.g., "Password must be at least 8 characters")
-    const reason = (data && (data.message || data.error || data.title)) || res.statusText || 'Registration failed';
-    throw new Error(`${res.status} ${reason}`);
+    const reason =
+      (data && (data.message || data.error || data.title)) ||
+      res.statusText ||
+      'Registration failed';
+    throw new Error(res.status + ' ' + reason);
   }
+
   return data;
 }
 
 function nextUrl() {
-  // after sign-up, send them to login
-  const p = new URLSearchParams(location.search).get('next');
-  if (p && /^\/(?!\/)/.test(p)) return p;
+  const params = new URLSearchParams(location.search);
+  const candidate = params.get('next');
+
+  // only allow same relative paths like /app.html
+  if (candidate && /^\/(?!\/)/.test(candidate)) {
+    return candidate;
+  }
+
   return 'signin.html';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  $('#register-form').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const btn = $('#register-btn');
-    btn.disabled = true;
+  const form = document.getElementById('register-form');
+  if (!form) {
+    return;
+  }
 
-    const name = $('#name').value.trim();
-    const password = $('#password').value;
-    const confirm = $('#confirm').value;
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+
+    const btn = document.getElementById('register-btn');
+    if (btn) {
+      btn.disabled = true;
+    }
+
+    const nameEl = document.getElementById('name');
+    const passwordEl = document.getElementById('password');
+    const confirmEl = document.getElementById('confirm');
+
+    const name = (nameEl?.value || '').trim();
+    const password = passwordEl?.value || '';
+    const confirm = confirmEl?.value || '';
 
     if (!name || !password || !confirm) {
       msg('All fields are required.', true);
-      btn.disabled = false;
+      if (btn) btn.disabled = false;
       return;
     }
+
     if (password !== confirm) {
       msg('Passwords do not match.', true);
-      btn.disabled = false;
+      if (btn) btn.disabled = false;
       return;
     }
 
@@ -62,11 +103,15 @@ document.addEventListener('DOMContentLoaded', () => {
       msg('Creating your account…');
       await registerUser({ name, password });
       msg('Account created. Redirecting to sign in…');
-      setTimeout(() => { location.href = nextUrl(); }, 250);
-    } catch (e) {
-      msg(e.message || String(e), true);
+      setTimeout(() => {
+        location.href = nextUrl();
+      }, 250);
+    } catch (err) {
+      msg(err?.message ? String(err.message) : String(err), true);
     } finally {
-      btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+      }
     }
   });
 });

@@ -7,19 +7,19 @@ const cfg = {
   farms: '/api/farms',
   farmsMine: '/api/farms/mine',
   animalsMine: '/api/animals/mine',
-  animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`,
   animalsBuy: '/api/animals/buy',
+  productsMine: '/api/products/mine',
+  productSell: '/api/products/sell',
+
+  animalsByFarm: (farmId) => `/api/animals/${encodeURIComponent(farmId)}`,
   animalSell: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell`,
   animalSellQuote: (animalId) => `/api/animals/${encodeURIComponent(animalId)}/sell-quote`,
-  productsMine: '/api/products/mine',
   productsByFarm: (farmId) => `/api/products/view?farmId=${encodeURIComponent(farmId)}`,
-  productSell: '/api/products/sell',
   productSellQuote: (type, qty) => `/api/products/sell-quote?type=${encodeURIComponent(type)}&quantity=${encodeURIComponent(qty)}`
 };
 
 const $ = s => document.querySelector(s);
-const jsonOut = $('#json-out');
-const tableOut = $('#table-out');
+
 const speciesMap = {
   1: 'Cow',
   2: 'Chicken',
@@ -31,33 +31,57 @@ const SPECIES_PRICES = {
   Sheep: 200
 };
 
-// simple HTML escaper to render names safely
+// this is necessary for html to not break
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
-// state for future filtering
+// holds users data and selection
 const farmsState = { list: [], selectedId: null };
 const animalsState = { counts: [], selectedKind: null };
 const productsState = { counts: [], selectedName: null };
 
-// balance helpers
-function toNumberOrNull(v) {
-  if (v === null || v === undefined) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function setBalanceChip(val) {
-  const el = document.getElementById('who-balance');
-  if (!el) return;
-  if (val === null || val === undefined) { el.textContent = '—'; return; }
-  // Locale-friendly number. No currency symbol (unknown).
-  el.textContent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(val);
+// convert data into valid number
+function toNumberOrNull(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const numberValue = Number(value);
+
+  if (Number.isFinite(numberValue)) {
+    return numberValue;
+  }
+  return null;
 }
 
-// jwt token functions
-// reading, refreshing and saving tokens
-function getToken() { return sessionStorage.getItem('authToken'); }
+
+// lets showing balance on main page
+function setBalanceChip(val) {
+  const element = document.getElementById('who-balance');
+
+  if (!element) {
+    return;
+  }
+
+  if (val === null || val === undefined) {
+    element.textContent = '—';
+    return;
+  }
+
+  const formatter = new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2
+  });
+  const formatted = formatter.format(val);
+  element.textContent = formatted;
+}
+
+
+// jwt token functions / reading, refreshing and saving tokens
+function getToken() { 
+  return sessionStorage.getItem('authToken'); 
+}
+
 function decodeJwt(token) {
   try {
     const payload = token.split('.')[1];
@@ -65,18 +89,31 @@ function decodeJwt(token) {
     return JSON.parse(json);
   } catch { return null; }
 }
+
 function tokenExpired(payload) {
   if (!payload || !payload.exp) return false;
   return (Date.now() / 1000) >= payload.exp;
 }
+
 function extractToken(x) {
   if (!x) return null;
   if (typeof x === 'string') return x.split('.').length === 3 ? x : null;
-  if (typeof x === 'object') return x.jwt || x.accessToken || x.access_token || x.token || x.AccessToken || null;
+  if (typeof x === 'object') return x.jwt ?? null;
   return null;
 }
+
 function secondsUntilExpiry(p) {
   return p?.exp ? (p.exp - Math.floor(Date.now()/1000)) : Number.POSITIVE_INFINITY;
+}
+
+function getRefreshToken() { 
+  return sessionStorage.getItem('refreshToken'); 
+}
+
+function saveRefreshToken(rt) { 
+  if (rt) {
+    sessionStorage.setItem('refreshToken', rt); 
+  }
 }
 
 const REFRESH_SKEW = 60;
@@ -100,20 +137,34 @@ function scheduleRefresh() {
 
 // auto refresh system
 async function doRefresh() {
-  const token = getToken();
-  const h = { 'Accept':'application/json' };
-  if (token) h['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(cfg.refresh, { method:'POST', headers: h });
+  const rt = getRefreshToken();
+  if (!rt) return null;
+
+  const res = await fetch(cfg.refresh, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ refreshToken: rt })
+  });
 
   const text = await res.text();
-  let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  let data = null; 
+  try { 
+    data = text ? JSON.parse(text) : null; 
+  } catch { 
+    data = text; 
+  }
   if (!res.ok) return null;
 
-  const bodyToken = (data && (data.jwt || data.accessToken || data.access_token || data.token || data.AccessToken)) || null;
-  if (bodyToken) return bodyToken;
-  const auth = res.headers.get('Authorization');
-  if (auth && auth.startsWith('Bearer ')) return auth.slice(7);
-  return null;
+  const newJwt = data?.jwt ?? null;
+  const newRt  = data?.refreshToken ?? null;
+
+  if (newJwt) saveToken(newJwt);
+  if (newRt)  saveRefreshToken(newRt);
+
+  return newJwt;
 }
 
 async function ensureFreshToken() {
@@ -135,7 +186,7 @@ async function ensureFreshToken() {
 
 // showing roles and authentication on the page
 function normalizeRolesFromJwt(p) {
-  const keys = ['roles', 'role', 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
+  const keys = ['roles', 'role', 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role']; // gets roles from jwt
   const out = [];
   for (const k of keys) {
     const v = p?.[k];
@@ -146,295 +197,524 @@ function normalizeRolesFromJwt(p) {
 }
 
 function setRolesChip(roles) {
-  const el = document.getElementById('who-roles');
-  if (!el) return;
-  const list = Array.isArray(roles) ? roles : (roles ? [roles] : []);
-  el.textContent = list.length ? list.join(', ') : '—';
+  const element = document.getElementById('who-roles');
+  if (!element) {
+    return;
+  }
+
+  let list = [];
+  if (Array.isArray(roles)) {
+    list = roles;
+  } else if (typeof roles === 'string') {
+    list = [roles];
+  }
+
+  if (list.length > 0) {
+    element.textContent = list.join(', ');
+  } else {
+    element.textContent = '—';
+  }
 }
 
 function setAuthStatus(state) {
-  const el = document.getElementById('auth-status');
-  if (!el) return;
-  el.dataset.state = state;
-  el.textContent =
-    state === 'ok' ? 'Authorized' :
-    state === 'checking' ? 'Checking…' :
-    'Unauthorized';
+  const element = document.getElementById('auth-status');
+  if (!element) {
+    return;
+  }
+
+  element.dataset.state = state;
+
+  let label = 'Unauthorized';
+  if (state === 'ok') {
+    label = 'Authorized';
+  } else if (state === 'checking') {
+    label = 'Checking…';
+  }
+
+  element.textContent = label;
 }
+
 
 // run for getting user session data and authorization info
 async function runWhoAmIOnce() {
   setAuthStatus('checking');
   try {
-    const r = await api(cfg.whoami);
-    const ok = (r?.body && typeof r.body === 'object' && 'isAuthenticated' in r.body)
-      ? !!r.body.isAuthenticated
-      : r?.status === 200;
-    setAuthStatus(ok ? 'ok' : 'bad');
-    showJson(r.body); // can remove after developing finishes
-    if (r?.body?.roles) {
-    setRolesChip(r.body.roles);
-    } else if (Array.isArray(r?.body?.claims)) {
-    const uri = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
-    setRolesChip(r.body.claims.filter(c => c.Type === 'role' || c.Type === uri).map(c => c.Value));
+    const response = await api(cfg.whoami);
+
+    let isOk = false;
+    if (response && typeof response.body === 'object' && response.body !== null) {
+      if ('isAuthenticated' in response.body) {
+        isOk = Boolean(response.body.isAuthenticated);
+      } else {
+        isOk = response.status === 200;
+      }
+    } else {
+      isOk = response?.status === 200;
     }
-    // try to read a balance from whoami; support a few likely shapes
-    // r.body.balance, r.body.accountBalance, r.body.wallet.balance, r.body.credits, etc.
-    let bal = null;
-    const b = r?.body ?? {};
-    const candidates = [
-      b.balance, b.accountBalance, b.Balance, b.AccountBalance, b.credits, b.Credits,
-      b.wallet?.balance, b.Wallet?.Balance, b.profile?.balance, b.user?.balance
+
+    setAuthStatus(isOk ? 'ok' : 'bad');
+
+    showJson(response?.body);
+
+    const body = response?.body || {};
+    if (Array.isArray(body.roles)) {
+      setRolesChip(body.roles);
+    } else if (Array.isArray(body.claims)) {
+      const ROLE_URI = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
+      const roles =
+        body.claims
+          .filter(c => c && (c.Type === 'role' || c.Type === ROLE_URI))
+          .map(c => c.Value);
+      setRolesChip(roles);
+    } else {
+      setRolesChip([]);
+    }
+
+    let balanceValue = null;
+
+    const balanceCandidates = [
+      body.balance,
+      body.accountBalance,
+      body.Balance,
+      body.AccountBalance,
+      body.credits,
+      body.Credits,
+      body.wallet && body.wallet.balance,
+      body.Wallet && body.Wallet.Balance,
+      body.profile && body.profile.balance,
+      body.user && body.user.balance
     ];
-    for (const c of candidates) {
-      const n = toNumberOrNull(c);
-      if (n !== null) { bal = n; break; }
+
+    for (let i = 0; i < balanceCandidates.length; i += 1) {
+      const candidate = balanceCandidates[i];
+      const numeric = toNumberOrNull(candidate);
+      if (numeric !== null) {
+        balanceValue = numeric;
+        break;
+      }
     }
-    setBalanceChip(bal);
-  } catch (e) {
+
+    setBalanceChip(balanceValue);
+  } catch (err) {
     setAuthStatus('bad');
-    showJson(e);
+    showJson(err);
   }
 }
 
+
 // api wrapper
-async function api(path, { method='GET', body=null, headers={} } = {}) {
-  const token = getToken();
-  const h = { 'Accept':'application/json', ...headers };
+async function api(path, options = {}) {
+  const method  = options.method  ?? 'GET';
+  let   body    = options.body    ?? null;
+  const headers = options.headers ?? {};
+
+  const h = { 'Accept': 'application/json', ...headers };
+
   if (body !== null && typeof body !== 'string') {
     h['Content-Type'] = 'application/json';
     body = JSON.stringify(body);
   }
-  if (token) h['Authorization'] = `Bearer ${token}`;
 
-  let res = await fetch(path, { method, headers: h, body });
+  const token = getToken();
+  if (token) {
+    h['Authorization'] = `Bearer ${token}`;
+  }
 
+  let res  = await fetch(path, { method, headers: h, body });
   let text = await res.text();
-  let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; }
+  catch { data = text; }
 
   if (res.status === 401) {
     const refreshed = await ensureFreshToken();
     if (refreshed) {
       const token2 = getToken();
       if (token2) h['Authorization'] = `Bearer ${token2}`;
-      res = await fetch(path, { method, headers: h, body });
+
+      res  = await fetch(path, { method, headers: h, body });
       text = await res.text();
-      data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+      try { data = text ? JSON.parse(text) : null; }
+      catch { data = text; }
     }
   }
+
   if (res.status === 401) {
     sessionStorage.removeItem('authToken');
     location.href = `signin.html?next=${encodeURIComponent(location.pathname)}`;
     return;
   }
-  if (!res.ok) throw { status: res.status, statusText: res.statusText, body: data };
+
+  if (!res.ok) {
+    throw { status: res.status, statusText: res.statusText, body: data };
+  }
+
   return { status: res.status, headers: res.headers, body: data };
 }
 
-// dev renderers, can be removed later
+
+// --- debug stubs (UI removed) ---
 function showJson(x) {
-if (tableOut) tableOut.innerHTML = '';
-if (jsonOut) jsonOut.textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
+  try {
+    const pretty = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
+    console.debug('[debug]', pretty);
+  } catch { console.debug('[debug]', x); }
 }
+
 function renderTable(arr) {
-  if (!Array.isArray(arr) || arr.length === 0 || typeof arr[0] !== 'object') { showJson(arr); return; }
-  if (!tableOut) { showJson(arr); return; }
-  const escape = (v) => (v === null || v === undefined) ? '' : String(v);
-  const thead = `<thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>`;
-  const rows = arr.map(o => `<tr>${cols.map(c=>`<td>${escape(o[c])}</td>`).join('')}</tr>`).join('');
-  tableOut.innerHTML = `<div style="max-height:50vh;overflow:auto"><table>${thead}<tbody>${rows}</tbody></table></div>`;
-  if (jsonOut) jsonOut.textContent = JSON.stringify(arr, null, 2);
+  if (Array.isArray(arr) && arr.length && typeof arr[0] === 'object') {
+    try { console.table(arr); } catch { console.log(arr); }
+  } else {
+    showJson(arr);
+  }
 }
+
 
 // --- Animals helpers ---
 function kindFromAnimal(a) {
-  let v = a?.kind ?? a?.Kind ?? a?.species ?? a?.Species ?? a?.type ?? a?.Type;
-  if (v === null || v === undefined) return 'Unknown';
-  const n = typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? Number(v) : NaN);
-  if (!Number.isNaN(n) && speciesMap[n]) return speciesMap[n];
+  let v = a?.kind 
+       ?? a?.Kind 
+       ?? a?.species 
+       ?? a?.Species 
+       ?? a?.type 
+       ?? a?.Type;
+
+  if (v === null || v === undefined) {
+    return 'Unknown';
+  }
+
+  let n;
+  if (typeof v === 'number') {
+    n = v;
+  } else if (/^\d+$/.test(String(v))) {
+    n = Number(v);
+  } else {
+    n = NaN;
+  }
+
+  if (!Number.isNaN(n) && speciesMap[n]) {
+    return speciesMap[n];
+  }
+
   return String(v);
 }
+
 function countByKind(arr) {
   const map = new Map();
-  for (const a of (Array.isArray(arr) ? arr : [])) {
+
+  const list = Array.isArray(arr) ? arr : [];
+  for (const a of list) {
     const k = String(kindFromAnimal(a));
-    map.set(k, (map.get(k) ?? 0) + 1);
+    const current = map.get(k) ?? 0;
+    map.set(k, current + 1);
   }
-  return Array.from(map, ([kind, count]) => ({ kind, count }));
+
+  const result = [];
+  for (const [kind, count] of map) {
+    result.push({ kind, count });
+  }
+
+  return result;
 }
+
 function renderAnimals() {
   const host = document.getElementById('animals-list');
-  if (!host) return;
-  const list = Array.isArray(animalsState.counts) ? animalsState.counts : [];
-  if (list.length === 0) {
-    host.innerHTML = `<span class="chip">No animals found.</span>`;
+  if (!host) {
     return;
   }
-  host.innerHTML = list.map(x => {
-    const selected = String(animalsState.selectedKind ?? '') === String(x.kind ?? '');
-    const pressed = selected ? 'true' : 'false';
-    return `<button class="btn"
-              data-animal-kind="${esc(x.kind)}"
-              ${selected ? 'data-selected="true"' : ''}
-              aria-pressed="${pressed}"
-              title="${selected ? 'Selected – click to deselect' : 'Click to select'}">
-              ${esc(x.kind)} × ${esc(x.count)}
-            </button>`;
-  }).join('');
+
+  const list = Array.isArray(animalsState.counts) ? animalsState.counts : [];
+  if (list.length === 0) {
+    host.innerHTML = '<span class="chip">No animals found.</span>';
+    return;
+  }
+
+  // build one button per animal species so user can select
+  let html = '';
+  for (const item of list) {
+    const isSelected = String(animalsState.selectedKind ?? '') === String(item.kind ?? '');
+    const aria = isSelected ? 'true' : 'false';
+    const selectedAttr = isSelected ? 'data-selected="true"' : '';
+
+    html +=
+      '<button class="btn" ' +
+        'data-animal-kind="' + esc(item.kind) + '" ' +
+        selectedAttr + ' ' +
+        'aria-pressed="' + aria + '" ' +
+        'title="' + (isSelected ? 'Selected – click to deselect' : 'Click to select') + '">' +
+        esc(item.kind) + ' × ' + esc(item.count) +
+      '</button>';
+  }
+
+  host.innerHTML = html;
 }
+
 async function loadAnimals() {
   const host = document.getElementById('animals-list');
-  if (host) host.innerHTML = `<span class="chip">Loading…</span>`;
+  if (host) {
+    host.innerHTML = '<span class="chip">Loading…</span>';
+  }
+
   try {
-    // If a farm is selected: pull animals for that farm, then aggregate client-side
+    let counts = [];
+
     if (farmsState.selectedId) {
-      const r = await api(cfg.animalsByFarm(farmsState.selectedId));
-      const counts = countByKind(Array.isArray(r?.body) ? r.body : []);
-      animalsState.counts = counts;
+      const res = await api(cfg.animalsByFarm(farmsState.selectedId));
+      const list = Array.isArray(res && res.body) ? res.body : [];
+      counts = countByKind(list);
     } else {
-      // No farm selected: use the server-side aggregated endpoint
-      const r = await api(cfg.animalsMine);
-      animalsState.counts = Array.isArray(r?.body) ? r.body : [];
+      const res = await api(cfg.animalsMine);
+      counts = Array.isArray(res && res.body) ? res.body : [];
     }
+
+    animalsState.counts = counts;
     renderAnimals();
-  } catch (e) {
-    if (host) host.innerHTML = `<span class="chip">Failed to load.</span>`;
-    showJson(e);
+  } catch (err) {
+    if (host) {
+      host.innerHTML = '<span class="chip">Failed to load.</span>';
+    }
+    showJson(err);
   }
 }
 
-// --- Products helpers ---
-// your API names are “milk 1, eggs 2, wool 3”. handle numbers or strings.
-const PRODUCT_NAME_MAP = { 1: 'Milk', 2: 'Eggs', 3: 'Wool' };
+
+// product helpers
+const PRODUCT_NAME_MAP = {
+  1: 'Milk',
+  2: 'Eggs',
+  3: 'Wool'
+};
+
 function nameFromProduct(p) {
-  let v = p?.name ?? p?.Name ?? p?.type ?? p?.Type ?? p?.kind ?? p?.Kind;
-  if (v === null || v === undefined) return 'Unknown';
-  // numeric → map to label
-  const n = typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? Number(v) : NaN);
-  if (!Number.isNaN(n) && PRODUCT_NAME_MAP[n]) return PRODUCT_NAME_MAP[n];
-  return String(v);
+  let value = null;
+
+  if (p) {
+    if ('name' in p)       value = p.name;
+    else if ('Name' in p)  value = p.Name;
+    else if ('type' in p)  value = p.type;
+    else if ('Type' in p)  value = p.Type;
+    else if ('kind' in p)  value = p.kind;
+    else if ('Kind' in p)  value = p.Kind;
+  }
+
+  if (value === null || value === undefined) {
+    return 'Unknown';
+  }
+
+  let num;
+  if (typeof value === 'number') {
+    num = value;
+  } else if (/^\d+$/.test(String(value))) {
+    num = Number(value);
+  } else {
+    num = NaN;
+  }
+
+  if (!Number.isNaN(num) && PRODUCT_NAME_MAP[num]) {
+    return PRODUCT_NAME_MAP[num];
+  }
+
+  return String(value);
 }
+
 function countByProductName(arr) {
   const map = new Map();
-  for (const p of (Array.isArray(arr) ? arr : [])) {
-    const k = String(nameFromProduct(p));
-    map.set(k, (map.get(k) ?? 0) + 1);
+
+  const list = Array.isArray(arr) ? arr : [];
+  for (const product of list) {
+    const key = String(nameFromProduct(product));
+    const current = map.get(key) ?? 0;
+    const next = current + 1;
+    map.set(key, next);
   }
-  return Array.from(map, ([name, count]) => ({ name, count }));
+
+  const result = [];
+  for (const [name, count] of map) {
+    result.push({ name, count });
+  }
+
+  return result;
 }
+
 function renderProducts() {
   const host = document.getElementById('products-list');
-  if (!host) return;
-  const list = Array.isArray(productsState.counts) ? productsState.counts : [];
-  if (list.length === 0) {
-    host.innerHTML = `<span class="chip">No products found.</span>`;
+  if (!host) {
     return;
   }
-  host.innerHTML = list.map(x => {
-    const selected = String(productsState.selectedName ?? '') === String(x.name ?? '');
-    const pressed = selected ? 'true' : 'false';
-    return `<button class="btn"
-              data-product-name="${esc(x.name)}"
-              ${selected ? 'data-selected="true"' : ''}
-              aria-pressed="${pressed}"
-              title="${selected ? 'Selected – click to deselect' : 'Click to select'}">
-              ${esc(x.name)} × ${esc(x.count)}
-            </button>`;
-  }).join('');
+
+  const list = Array.isArray(productsState.counts) ? productsState.counts : [];
+  if (list.length === 0) {
+    host.innerHTML = '<span class="chip">No products found.</span>';
+    return;
+  }
+
+  let html = '';
+  for (const item of list) {
+    const isSelected = String(productsState.selectedName ?? '') === String(item.name ?? '');
+    const aria = isSelected ? 'true' : 'false';
+    const selectedAttr = isSelected ? 'data-selected="true"' : '';
+
+    html +=
+      '<button class="btn" ' +
+        'data-product-name="' + esc(item.name) + '" ' +
+        selectedAttr + ' ' +
+        'aria-pressed="' + aria + '" ' +
+        'title="' + (isSelected ? 'Selected – click to deselect' : 'Click to select') + '">' +
+        esc(item.name) + ' × ' + esc(item.count) +
+      '</button>';
+  }
+
+  host.innerHTML = html;
 }
 
 async function loadProducts() {
   const host = document.getElementById('products-list');
-  if (host) host.innerHTML = `<span class="chip">Loading…</span>`;
+  if (host) {
+    host.innerHTML = '<span class="chip">Loading…</span>';
+  }
+
   try {
+    let counts = [];
+
     if (farmsState.selectedId) {
-      const r = await api(cfg.productsByFarm(farmsState.selectedId));
-      productsState.counts = countByProductName(Array.isArray(r?.body) ? r.body : []);
+      const res = await api(cfg.productsByFarm(farmsState.selectedId));
+      const list = Array.isArray(res && res.body) ? res.body : [];
+      counts = countByProductName(list);
     } else {
-      const r = await api(cfg.productsMine);
-      productsState.counts = Array.isArray(r?.body) ? r.body : [];
-      // normalize server payload shape if needed
-      // expected: [{ name: 'Milk', count: 3 }, ...]
+      const res = await api(cfg.productsMine);
+      counts = Array.isArray(res && res.body) ? res.body : [];
     }
+
+    productsState.counts = counts;
     renderProducts();
-  } catch (e) {
-    if (host) host.innerHTML = `<span class="chip">Failed to load.</span>`;
-    showJson(e);
+  } catch (err) {
+    if (host) {
+      host.innerHTML = '<span class="chip">Failed to load.</span>';
+    }
+    showJson(err);
   }
 }
 
-// --- My Farms box logic ---
 function renderFarms() {
   const host = document.getElementById('farms-list');
-  if (!host) return;
-  const farms = Array.isArray(farmsState.list) ? farmsState.list : [];
-  if (farms.length === 0) {
-    host.innerHTML = `<span class="chip">No farms found.</span>`;
+  if (!host) {
     return;
   }
-  const html = farms.map(f => {
-    const id = f.id ?? f.Id ?? f.farmId ?? f.FarmId;
-    const name = f.name ?? f.Name ?? `Farm #${id ?? '—'}`;
-    const selected = String(farmsState.selectedId ?? '') === String(id ?? '');
-    const pressed = selected ? 'true' : 'false';
-    const check = selected ? '✓ ' : '';
-    return `<button class="btn" data-farmid="${esc(id)}" ${selected ? 'data-selected="true"' : ''} aria-pressed="${pressed}" title="${selected ? 'Selected – click to deselect' : 'Click to select'}">${check}${esc(name)}</button>`;
-  }).join('');
+
+  const farms = Array.isArray(farmsState.list) ? farmsState.list : [];
+  if (farms.length === 0) {
+    host.innerHTML = '<span class="chip">No farms found.</span>';
+    return;
+  }
+
+  let html = '';
+  for (const f of farms) {
+    const id =
+      (f && (f.id ?? f.Id ?? f.farmId ?? f.FarmId)) ?? '';
+    const name =
+      (f && (f.name ?? f.Name)) ?? ('Farm #' + (id || '—'));
+
+    const isSelected =
+      String(farmsState.selectedId ?? '') === String(id ?? '');
+
+    const aria = isSelected ? 'true' : 'false';
+    const selectedAttr = isSelected ? 'data-selected="true"' : '';
+    const check = isSelected ? '✓ ' : '';
+
+    html +=
+      '<button class="btn" ' +
+        'data-farmid="' + esc(id) + '" ' +
+        selectedAttr + ' ' +
+        'aria-pressed="' + aria + '" ' +
+        'title="' + (isSelected ? 'Selected – click to deselect' : 'Click to select') + '">' +
+        check + esc(name) +
+      '</button>';
+  }
   host.innerHTML = html;
 }
 
+
 async function loadMyFarms() {
   const host = document.getElementById('farms-list');
-  if (host) host.innerHTML = `<span class="chip">Loading…</span>`;
+  if (host) {
+    host.innerHTML = '<span class="chip">Loading…</span>';
+  }
   try {
-    const r = await api(cfg.farmsMine);
-    farmsState.list = Array.isArray(r?.body) ? r.body : [];
-    // preserve selection if it still exists
-    if (!farmsState.list.some(f => String(f.id ?? f.Id) === String(farmsState.selectedId))) {
+    const res = await api(cfg.farmsMine);
+    const list = Array.isArray(res && res.body) ? res.body : [];
+    farmsState.list = list;
+
+    const stillExists = farmsState.list.some(f =>
+      String(f?.id ?? f?.Id) === String(farmsState.selectedId)
+    );
+    if (!stillExists) {
       farmsState.selectedId = null;
     }
+
     renderFarms();
-  } catch (e) {
-    if (host) host.innerHTML = `<span class="chip">Failed to load.</span>`;
-    showJson(e);
+  } catch (err) {
+    if (host) {
+      host.innerHTML = '<span class="chip">Failed to load.</span>';
+    }
+    showJson(err);
   }
 }
 
 // updates info on header from jwt token
 function reflectUserFromToken(token) {
-  const p = decodeJwt(token);
-  $('#who-name').textContent = p?.name || p?.unique_name || p?.sub || '—';
-  const roles = normalizeRolesFromJwt(p);
+  const payload = decodeJwt(token);
+
+  let name = '—';
+  if (payload) {
+    if (payload.name) {
+      name = payload.name;
+    } else if (payload.unique_name) {
+      name = payload.unique_name;
+    } else if (payload.sub) {
+      name = payload.sub;
+    }
+  }
+  document.getElementById('who-name').textContent = name;
+  const roles = normalizeRolesFromJwt(payload);
   setRolesChip(roles);
-//  $('#who-exp').textContent = 'exp: ' + (p?.exp ? new Date(p.exp * 1000).toLocaleString() : 'n/a');
+  //  $('#who-exp').textContent = 'exp: ' + (p?.exp ? new Date(p.exp * 1000).toLocaleString() : 'n/a');
 }
+
 
 // boot
 async function boot() {
   const token = getToken();
   if (!token) {
-    location.href = `signin.html?next=${encodeURIComponent(location.pathname)}`;
+    location.href = 'signin.html?next=' + encodeURIComponent(location.pathname);
     return;
   }
-  const p = decodeJwt(token);
-  if (tokenExpired(p)) {
+
+  const payload = decodeJwt(token);
+  if (tokenExpired(payload)) {
     sessionStorage.removeItem('authToken');
-    location.href = `signin.html?next=${encodeURIComponent(location.pathname)}`;
+    location.href = 'signin.html?next=' + encodeURIComponent(location.pathname);
     return;
   }
+
   reflectUserFromToken(token);
 
   try {
-    const r = await api(cfg.whoami);
-    if (r?.body) {
-      $('#who-name').textContent = r.body.name || $('#who-name').textContent;
-      showJson(r.body);
+    const res = await api(cfg.whoami);
+    if (res && res.body) {
+      const currentName = document.getElementById('who-name').textContent;
+      document.getElementById('who-name').textContent = res.body.name || currentName;
+      showJson(res.body);
     }
-    await Promise.all([loadMyFarms(), loadAnimals(), loadProducts()]);
-  } catch (e) {
-    showJson(e);
+
+    await loadMyFarms();
+    await loadAnimals();
+    await loadProducts();
+  } catch (err) {
+    showJson(err);
   }
 }
+
 
 document.addEventListener('DOMContentLoaded', () => {
   $('#logout-btn').addEventListener('click', () => {
@@ -443,163 +723,270 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const whoBtn = document.getElementById('btn-whoami');
-  if (whoBtn) whoBtn.addEventListener('click', async () => {
-    try { const r = await api(cfg.whoami); showJson(r.body); }
-    catch (e) { showJson(e); }
-  });
+  if (whoBtn) {
+    whoBtn.addEventListener('click', async () => {
+      try {
+        const r = await api(cfg.whoami);
+        showJson(r.body);
+      } catch (e) {
+        showJson(e);
+      }
+    });
+  }
 
   const farmsBtn = document.getElementById('btn-farms');
-  if (farmsBtn) farmsBtn.addEventListener('click', async () => {
-    try { const r = await api(cfg.farms); renderTable(r.body); }
-    catch (e) { showJson(e); }
-  });
+  if (farmsBtn) {
+    farmsBtn.addEventListener('click', async () => {
+      try {
+        const r = await api(cfg.farms);
+        renderTable(r.body);
+      } catch (e) {
+        showJson(e);
+      }
+    });
+  }
 
   // refresh farms on demand
   const refreshBtn = document.getElementById('btn-refresh-farms');
-  if (refreshBtn) refreshBtn.addEventListener('click', loadMyFarms);
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', loadMyFarms);
+  }
 
   // create farm flow
   const createBtn = document.getElementById('btn-create-farm');
-  if (createBtn) createBtn.addEventListener('click', async () => {
-    const name = (prompt('New farm name:') || '').trim();
-    if (!name) return; // user cancelled or empty
-    createBtn.disabled = true;
-    try {
-      const r = await api(cfg.farms, {
-        method: 'POST',
-        body: { farmName: name }
-      });
-      // Try to pick the new farm’s id/name from the response
-      const created = r?.body || {};
-      const newId = created.id ?? created.Id ?? created.farmId ?? created.FarmId ?? null;
-      farmsState.selectedId = newId;
-      await loadMyFarms();
-    } catch (e) {
-      showJson(e);
-      alert('Failed to create farm.');
-    } finally {
-      createBtn.disabled = false;
-    }
-  });
+  if (createBtn) {
+    createBtn.addEventListener('click', async () => {
+      const nameInput = prompt('New farm name:') || '';
+      const name = nameInput.trim();
+      if (!name) {
+        return;
+      }
 
-  // delete farm flow (selected only)
+      createBtn.disabled = true;
+
+      try {
+        const r = await api(cfg.farms, {
+          method: 'POST',
+          body: { farmName: name }
+        });
+
+        const created = r?.body || {};
+        const newId =
+          created.id ??
+          created.Id ??
+          created.farmId ??
+          created.FarmId ??
+          null;
+
+        farmsState.selectedId = newId;
+        await loadMyFarms();
+      } catch (e) {
+        showJson(e);
+        alert('Failed to create farm.');
+      } finally {
+        createBtn.disabled = false;
+      }
+    });
+  }
+
+  // delete selected farm flow
   const deleteBtn = document.getElementById('btn-delete-farm');
-  if (deleteBtn) deleteBtn.addEventListener('click', async () => {
-    const id = farmsState.selectedId;
-    if (!id) { alert('Select a farm to delete.'); return; }
-    const name = (farmsState.list.find(f => String(f.id ?? f.Id) === String(id))?.name) ?? `#${id}`;
-    if (!confirm(`Are you sure you want to delete farm "${name}"? This cannot be undone.`)) return;
-    deleteBtn.disabled = true;
-    try {
-      await api(`${cfg.farms}/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      // clear selection and refresh list
-      farmsState.selectedId = null;
-      await loadMyFarms();
-    } catch (e) {
-      showJson(e);
-      alert('Failed to delete farm.');
-    } finally {
-      deleteBtn.disabled = false;
-    }
-  });
-  
-  // click-to-toggle select
-  const farmsList = document.getElementById('farms-list');
-  if (farmsList) farmsList.addEventListener('click', (e) => {
-    // clicks can originate from text nodes; normalize to an Element
-    let node = e.target;
-    if (!(node instanceof Element)) node = node.parentElement;
-    if (!node) return;
-    const btn = node.closest('button[data-farmid]');
-    if (!btn) return;
-    const id = btn.getAttribute('data-farmid');
-    farmsState.selectedId = (String(farmsState.selectedId) === String(id)) ? null : id;
-    renderFarms();
-    loadAnimals();
-    loadProducts();
-  });
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      const id = farmsState.selectedId;
+      if (!id) {
+        alert('Select a farm to delete.');
+        return;
+      }
 
-  // products manual refresh
+      const name =
+        (farmsState.list.find(f => String(f.id ?? f.Id) === String(id))?.name) ??
+        `#${id}`;
+
+      const confirmed = confirm(
+        `Are you sure you want to delete farm "${name}"? This cannot be undone.`
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      deleteBtn.disabled = true;
+
+      try {
+        await api(`${cfg.farms}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        // clear selection and refresh list
+        farmsState.selectedId = null;
+        await loadMyFarms();
+      } catch (e) {
+        showJson(e);
+        alert('Failed to delete farm.');
+      } finally {
+        deleteBtn.disabled = false;
+      }
+    });
+  }
+
+  // toggle select
+  const farmsList = document.getElementById('farms-list');
+  if (farmsList) {
+    farmsList.addEventListener('click', (e) => {
+      let node = e.target;
+      if (!(node instanceof Element)) {
+        node = node.parentElement;
+      }
+      if (!node) {
+        return;
+      }
+
+      const btn = node.closest('button[data-farmid]');
+      if (!btn) {
+        return;
+      }
+
+      const id = btn.getAttribute('data-farmid');
+      const isSame = String(farmsState.selectedId) === String(id);
+      farmsState.selectedId = isSame ? null : id;
+
+      renderFarms();
+      loadAnimals();
+      loadProducts();
+    });
+  }
+
+  // refresh products manually
   const refreshProductsBtn = document.getElementById('btn-refresh-products');
-  if (refreshProductsBtn) refreshProductsBtn.addEventListener('click', loadProducts);
+  if (refreshProductsBtn) {
+    refreshProductsBtn.addEventListener('click', loadProducts);
+  }
 
   const refreshAnimalsBtn = document.getElementById('btn-refresh-animals');
-  if (refreshAnimalsBtn) refreshAnimalsBtn.addEventListener('click', loadAnimals);
+  if (refreshAnimalsBtn) {
+    refreshAnimalsBtn.addEventListener('click', loadAnimals);
+  }
 
   function updateBuyPriceChip() {
     const sel = document.getElementById('buy-species');
     const chip = document.getElementById('buy-price-chip');
-    if (!sel || !chip) return;
+    if (!sel || !chip) {
+      return;
+    }
+
     const price = SPECIES_PRICES[sel.value];
     chip.textContent = 'Price: ' + (price != null ? String(price) : '—');
   }
+
   function showBuyPanel() {
     const panel = document.getElementById('buy-panel');
-    if (!panel) return;
+    if (!panel) {
+      return;
+    }
+
     panel.hidden = false;
     updateBuyPriceChip();
-    document.getElementById('buy-species')?.focus();
+
+    const speciesEl = document.getElementById('buy-species');
+    if (speciesEl) {
+      speciesEl.focus();
+    }
   }
+
   function hideBuyPanel() {
     const panel = document.getElementById('buy-panel');
-    if (panel) panel.hidden = true;
+    if (panel) {
+      panel.hidden = true;
+    }
   }
 
-  // BUY: show the inline picker only when clicked
-  document.getElementById('btn-buy-animal')?.addEventListener('click', () => {
-    if (!farmsState.selectedId) { alert('Select a farm first.'); return; }
-    showBuyPanel();
-  });
-  // BUY: live price update on species change
-  document.getElementById('buy-species')?.addEventListener('change', updateBuyPriceChip);
-  // BUY: cancel hides the panel
-  document.getElementById('buy-cancel')?.addEventListener('click', hideBuyPanel);
-  // BUY: confirm purchase
-  document.getElementById('buy-confirm')?.addEventListener('click', async () => {
-    const farmId = farmsState.selectedId;
-    if (!farmId) { alert('Select a farm first.'); hideBuyPanel(); return; }
-    const species = document.getElementById('buy-species')?.value || 'Sheep';
-    const price = SPECIES_PRICES[species];
-    if (!confirm(`Do you want to buy a ${species} for ${price}?`)) return;
+  const buyBtn = document.getElementById('btn-buy-animal');
+  if (buyBtn) {
+    buyBtn.addEventListener('click', () => {
+      if (!farmsState.selectedId) {
+        alert('Select a farm first.');
+        return;
+      }
+      showBuyPanel();
+    });
+  }
 
-    const btn = document.getElementById('buy-confirm');
-    if (btn) btn.disabled = true;
-    try {
-      await api(`${cfg.animalsBuy}?farmId=${encodeURIComponent(farmId)}`, {
-        method: 'POST',
-        body: { species }
-      });
-      hideBuyPanel();
-      await loadAnimals(); // reflect new counts
-      // refresh balance chip (since buying costs money)
+  const buySpecies = document.getElementById('buy-species');
+  if (buySpecies) {
+    buySpecies.addEventListener('change', updateBuyPriceChip);
+  }
+
+  const buyCancel = document.getElementById('buy-cancel');
+  if (buyCancel) {
+    buyCancel.addEventListener('click', hideBuyPanel);
+  }
+
+  const buyConfirm = document.getElementById('buy-confirm');
+  if (buyConfirm) {
+    buyConfirm.addEventListener('click', async () => {
+      const farmId = farmsState.selectedId;
+      if (!farmId) {
+        alert('Select a farm first.');
+        hideBuyPanel();
+        return;
+      }
+
+      const species = document.getElementById('buy-species')?.value || 'Sheep';
+      const price = SPECIES_PRICES[species];
+
+      const confirmed = confirm(`Do you want to buy a ${species} for ${price}?`);
+      if (!confirmed) {
+        return;
+      }
+
+      const btn = document.getElementById('buy-confirm');
+      if (btn) {
+        btn.disabled = true;
+      }
+
       try {
-        const r = await api(cfg.whoami);
-        setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
-      } catch {}
-    } catch (e) {
-      showJson(e);
-      alert('Failed to buy animal.');
-    } finally {
-      if (btn) btn.disabled = false;
-    }
-  });
+        await api(`${cfg.animalsBuy}?farmId=${encodeURIComponent(farmId)}`, {
+          method: 'POST',
+          body: { species }
+        });
+
+        hideBuyPanel();
+        await loadAnimals();
+
+        try {
+          const r = await api(cfg.whoami);
+          setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
+        } catch {}
+      } catch (e) {
+        showJson(e);
+        alert('Failed to buy animal.');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+        }
+      }
+    });
+  }
 
   async function pickOldestAnimalId(farmId, kind) {
-    // fetch animals for farm
     const r = await api(cfg.animalsByFarm(farmId));
     const animals = Array.isArray(r?.body) ? r.body : [];
-    // Normalize species/kind
+
     const matches = animals.filter(a => {
       const species = a?.species ?? a?.Species ?? a?.kind ?? a?.Kind;
       return String(species) === String(kind);
     });
-    if (matches.length === 0) return null;
 
-    // Sort by RemainingLifeDays ascending (oldest first). Fallback to PurchasedAt ascending.
+    if (matches.length === 0) {
+      return null;
+    }
+
+    // to sell the oldest animal
     matches.sort((a, b) => {
       const ra = (a?.remainingLifeDays ?? a?.RemainingLifeDays ?? Infinity);
       const rb = (b?.remainingLifeDays ?? b?.RemainingLifeDays ?? Infinity);
-      if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) return ra - rb;
+
+      if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) {
+        return ra - rb;
+      }
+
       const pa = new Date(a?.purchasedAt ?? a?.PurchasedAt ?? 0).getTime();
       const pb = new Date(b?.purchasedAt ?? b?.PurchasedAt ?? 0).getTime();
       return pa - pb;
@@ -609,126 +996,173 @@ document.addEventListener('DOMContentLoaded', () => {
     return id;
   }
 
-
-  // Select/deselect animal kind
   const animalsList = document.getElementById('animals-list');
-  if (animalsList) animalsList.addEventListener('click', (e) => {
-    let node = e.target;
-    if (!(node instanceof Element)) node = node?.parentElement;
-    const btn = node?.closest('button[data-animal-kind]');
-    if (!btn) return;
-    const kind = btn.getAttribute('data-animal-kind');
-    animalsState.selectedKind =
-      (String(animalsState.selectedKind) === String(kind)) ? null : kind;
-    renderAnimals();
-  });
+  if (animalsList) {
+    animalsList.addEventListener('click', (e) => {
+      let node = e.target;
+      if (!(node instanceof Element)) {
+        node = node?.parentElement;
+      }
 
-  // SELL flow
+      const btn = node?.closest('button[data-animal-kind]');
+      if (!btn) {
+        return;
+      }
+
+      const kind = btn.getAttribute('data-animal-kind');
+      const same = String(animalsState.selectedKind) === String(kind);
+      animalsState.selectedKind = same ? null : kind;
+
+      renderAnimals();
+    });
+  }
+
   const sellBtn = document.getElementById('btn-sell-animal');
-  if (sellBtn) sellBtn.addEventListener('click', async () => {
-    const farmId = farmsState.selectedId;
-    if (!farmId) { alert('Select a farm first.'); return; }
-    const kind = animalsState.selectedKind;
-    if (!kind) { alert('Select an animal kind in the list.'); return; }
-    sellBtn.disabled = true;
-    try {
-      const animalId = await pickOldestAnimalId(farmId, kind);
-      if (!animalId) { alert(`No ${kind} found in this farm.`); return; }
+  if (sellBtn) {
+    sellBtn.addEventListener('click', async () => {
+      const farmId = farmsState.selectedId;
+      if (!farmId) {
+        alert('Select a farm first.');
+        return;
+      }
 
-      // fetch quote
-      let price = null;
+      const kind = animalsState.selectedKind;
+      if (!kind) {
+        alert('Select an animal kind in the list.');
+        return;
+      }
+
+      sellBtn.disabled = true;
+
       try {
-        const qr = await api(cfg.animalSellQuote(animalId));
-        price = qr?.body?.price ?? qr?.body?.Price ?? null;
-      } catch { /* quote optional */ }
+        const animalId = await pickOldestAnimalId(farmId, kind);
+        if (!animalId) {
+          alert(`No ${kind} found in this farm.`);
+          return;
+        }
 
-      const message = (price != null)
-        ? `Do you want to sell a ${kind} for ${price}?`
-        : `Do you want to sell a ${kind}?`;
-      if (!confirm(message)) return;
+        let price = null;
+        try {
+          const qr = await api(cfg.animalSellQuote(animalId));
+          price = qr?.body?.price ?? qr?.body?.Price ?? null;
+        } catch { }
 
-      // perform sell
-      const sr = await api(cfg.animalSell(animalId), { method: 'POST' });
-      // sr.body.earned may exist; show a toast/alert if you want
-      // Refresh animals + balance
-      await loadAnimals();
-      try {
-        const r = await api(cfg.whoami);
-        setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
-      } catch {}
-    } catch (e) {
-      showJson(e);
-      alert('Failed to sell animal.');
-    } finally {
-      sellBtn.disabled = false;
-    }
-  });
+        const message =
+          (price != null)
+            ? `Do you want to sell a ${kind} for ${price}?`
+            : `Do you want to sell a ${kind}?`;
 
-  // Select/deselect product kind
+        const confirmed = confirm(message);
+        if (!confirmed) {
+          return;
+        }
+
+        const sr = await api(cfg.animalSell(animalId), { method: 'POST' });
+
+        await loadAnimals();
+        try {
+          const r = await api(cfg.whoami);
+          setBalanceChip(toNumberOrNull(r?.body?.balance ?? r?.body?.Balance ?? null));
+        } catch {}
+      } catch (e) {
+        showJson(e);
+        alert('Failed to sell animal.');
+      } finally {
+        sellBtn.disabled = false;
+      }
+    });
+  }
+
   const productsList = document.getElementById('products-list');
-  if (productsList) productsList.addEventListener('click', (e) => {
-    let node = e.target;
-    if (!(node instanceof Element)) node = node?.parentElement;
-    const btn = node?.closest('button[data-product-name]');
-    if (!btn) return;
-    const name = btn.getAttribute('data-product-name');
-    productsState.selectedName =
-      (String(productsState.selectedName) === String(name)) ? null : name;
-    renderProducts();
-  });
+  if (productsList) {
+    productsList.addEventListener('click', (e) => {
+      let node = e.target;
+      if (!(node instanceof Element)) {
+        node = node?.parentElement;
+      }
 
-  // SELL PRODUCT flow
+      const btn = node?.closest('button[data-product-name]');
+      if (!btn) {
+        return;
+      }
+
+      const name = btn.getAttribute('data-product-name');
+      const same = String(productsState.selectedName) === String(name);
+      productsState.selectedName = same ? null : name;
+
+      renderProducts();
+    });
+  }
+
   const sellProdBtn = document.getElementById('btn-sell-product');
-  if (sellProdBtn) sellProdBtn.addEventListener('click', async () => {
-    const kind = productsState.selectedName;
-    if (!kind) { alert('Select a product kind first.'); return; }
+  if (sellProdBtn) {
+    sellProdBtn.addEventListener('click', async () => {
+      const kind = productsState.selectedName;
+      if (!kind) {
+        alert('Select a product kind first.');
+        return;
+      }
 
-    // figure out how many of this product we have
-    const entry = (productsState.counts || []).find(x => String(x.name) === String(kind));
-    const max = entry?.count ?? 0;
-    if (max <= 0) { alert(`You have no ${kind} to sell.`); return; }
+      const entry = (productsState.counts || []).find(x => String(x.name) === String(kind));
+      const max = entry?.count ?? 0;
+      if (max <= 0) {
+        alert(`You have no ${kind} to sell.`);
+        return;
+      }
 
-    // ask for quantity (1..max)
-    let qtyStr = prompt(`How many ${kind} do you want to sell? (max ${max})`);
-    if (qtyStr == null) return; // cancelled
-    let qty = Number.parseInt(qtyStr, 10);
-    if (!Number.isFinite(qty) || qty < 1) { alert('Enter a valid positive number.'); return; }
-    if (qty > max) { alert(`You can sell at most ${max}.`); qty = max; }
+      let qtyStr = prompt(`How many ${kind} do you want to sell? (max ${max})`);
+      if (qtyStr == null) {
+        return;
+      }
 
-    sellProdBtn.disabled = true;
-    try {
-      // try to get a quote (optional)
-      let price = null;
+      let qty = Number.parseInt(qtyStr, 10);
+      if (!Number.isFinite(qty) || qty < 1) {
+        alert('Enter a valid positive number.');
+        return;
+      }
+      if (qty > max) {
+        alert(`You can sell at most ${max}.`);
+        qty = max;
+      }
+
+      sellProdBtn.disabled = true;
+
       try {
-        const qr = await api(cfg.productSellQuote(kind, qty));
-        price = qr?.body?.price ?? qr?.body?.Price ?? null;
-      } catch { /* quote endpoint might not exist yet */ }
+        let price = null;
+        try {
+          const qr = await api(cfg.productSellQuote(kind, qty));
+          price = qr?.body?.price ?? qr?.body?.Price ?? null;
+        } catch { }
 
-      const msg = (price != null)
-        ? `Are you sure you want to sell ${qty} ${kind} for ${price}?`
-        : `Are you sure you want to sell ${qty} ${kind}?`;
-      if (!confirm(msg)) return;
-      // perform the sell
-      const r = await api(cfg.productSell, {
-        method: 'POST',
-        body: { type: kind, quantity: qty } // backend expects enum name string + quantity
-      });
-      // if API returns { earned }, you could surface it:
-      // if (r?.body?.earned != null) alert(`Sold for ${r.body.earned}.`);
+        const msg =
+          (price != null)
+            ? `Are you sure you want to sell ${qty} ${kind} for ${price}?`
+            : `Are you sure you want to sell ${qty} ${kind}?`;
 
-      // refresh products & balance
-      await loadProducts();
-      try {
-        const wr = await api(cfg.whoami);
-        setBalanceChip(toNumberOrNull(wr?.body?.balance ?? wr?.body?.Balance ?? null));
-      } catch {}
-    } catch (e) {
-      showJson(e);
-      alert('Failed to sell product.');
-    } finally {
-      sellProdBtn.disabled = false;
-    }
-  });
+        const confirmed = confirm(msg);
+        if (!confirmed) {
+          return;
+        }
+
+        const r = await api(cfg.productSell, {
+          method: 'POST',
+          body: { type: kind, quantity: qty }
+        });
+
+        // refresh products & balance
+        await loadProducts();
+        try {
+          const wr = await api(cfg.whoami);
+          setBalanceChip(toNumberOrNull(wr?.body?.balance ?? wr?.body?.Balance ?? null));
+        } catch {}
+      } catch (e) {
+        showJson(e);
+        alert('Failed to sell product.');
+      } finally {
+        sellProdBtn.disabled = false;
+      }
+    });
+  }
 
   boot();
   runWhoAmIOnce();
