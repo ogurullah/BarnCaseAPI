@@ -1,6 +1,6 @@
 'use strict';
 
-// config
+// api endpoints
 const cfg = {
   whoami: '/auth/whoami',
   refresh: '/auth/refresh',
@@ -233,17 +233,17 @@ async function api(path, { method='GET', body=null, headers={} } = {}) {
 
 // dev renderers, can be removed later
 function showJson(x) {
-  tableOut.innerHTML = '';
-  jsonOut.textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
+if (tableOut) tableOut.innerHTML = '';
+if (jsonOut) jsonOut.textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2);
 }
 function renderTable(arr) {
   if (!Array.isArray(arr) || arr.length === 0 || typeof arr[0] !== 'object') { showJson(arr); return; }
-  const cols = Array.from(new Set(arr.flatMap(o => Object.keys(o))));
+  if (!tableOut) { showJson(arr); return; }
   const escape = (v) => (v === null || v === undefined) ? '' : String(v);
   const thead = `<thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>`;
   const rows = arr.map(o => `<tr>${cols.map(c=>`<td>${escape(o[c])}</td>`).join('')}</tr>`).join('');
   tableOut.innerHTML = `<div style="max-height:50vh;overflow:auto"><table>${thead}<tbody>${rows}</tbody></table></div>`;
-  jsonOut.textContent = JSON.stringify(arr, null, 2);
+  if (jsonOut) jsonOut.textContent = JSON.stringify(arr, null, 2);
 }
 
 // --- Animals helpers ---
@@ -442,12 +442,14 @@ document.addEventListener('DOMContentLoaded', () => {
     location.href = 'signin.html';
   });
 
-  $('#btn-whoami').addEventListener('click', async () => {
+  const whoBtn = document.getElementById('btn-whoami');
+  if (whoBtn) whoBtn.addEventListener('click', async () => {
     try { const r = await api(cfg.whoami); showJson(r.body); }
     catch (e) { showJson(e); }
   });
 
-  $('#btn-farms').addEventListener('click', async () => {
+  const farmsBtn = document.getElementById('btn-farms');
+  if (farmsBtn) farmsBtn.addEventListener('click', async () => {
     try { const r = await api(cfg.farms); renderTable(r.body); }
     catch (e) { showJson(e); }
   });
